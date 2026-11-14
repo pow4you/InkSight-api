@@ -1,0 +1,29 @@
+inksight-api
+============
+
+This package is a restructured, object-oriented port of the example code
+published with "InkSight: Offline-to-Online Handwriting Conversion by Teaching
+Vision-Language Models to Read and Write" (Mitrevski, Rak, Schnitzler, Li,
+Maksai, Berent, Musat; TMLR 2025):
+
+    https://github.com/google-research/inksight   (colab.ipynb)
+
+The original notebook code is
+    Copyright 2024 Google LLC
+and is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Changes: the notebook's functions and duplicated helpers were reorganised into
+a layered package of classes with documented extension points. The model
+weights, the dataset and any ink produced from them are NOT part of this
+package; they come from the sources below and carry their own terms.
+
+Model weights and data
+----------------------
+The InkSight model (https://huggingface.co/Derendering/InkSight-Small-p), the
+supplementary derendering dataset and the human-tracing data are released by
+the authors under Apache-2.0 for RESEARCH, NON-COMMERCIAL use only, because
+they derive from non-commercial research datasets. The model card also asks
+that it not be used for privacy-intruding purposes such as forging
+handwriting.
+
+This is not an officially supported Google product.
