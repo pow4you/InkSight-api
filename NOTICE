@@ -1,10 +1,9 @@
-inksight-api
-============
+inksight
+========
 
-This package is a restructured, object-oriented port of the example code
-published with "InkSight: Offline-to-Online Handwriting Conversion by Teaching
-Vision-Language Models to Read and Write" (Mitrevski, Rak, Schnitzler, Li,
-Maksai, Berent, Musat; TMLR 2025):
+This package wraps the model and example code published with "InkSight:
+Offline-to-Online Handwriting Conversion by Teaching Vision-Language Models to
+Read and Write" (Mitrevski, Rak, Schnitzler, Li, Maksai, Berent, Musat; TMLR 2025):
 
     https://github.com/google-research/inksight   (colab.ipynb)
 
@@ -12,18 +11,21 @@ The original notebook code is
     Copyright 2024 Google LLC
 and is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-Changes: the notebook's functions and duplicated helpers were reorganised into
-a layered package of classes with documented extension points. The model
-weights, the dataset and any ink produced from them are NOT part of this
-package; they come from the sources below and carry their own terms.
+Changes: the notebook's pre- and post-processing were reorganised into a small
+class hierarchy with pluggable runners and word detectors; the graph's
+SentencePiece ops can be swapped for the sentencepiece Python package where
+tensorflow-text is unavailable (Windows).
 
-Model weights and data
-----------------------
-The InkSight model (https://huggingface.co/Derendering/InkSight-Small-p), the
-supplementary derendering dataset and the human-tracing data are released by
-the authors under Apache-2.0 for RESEARCH, NON-COMMERCIAL use only, because
-they derive from non-commercial research datasets. The model card also asks
-that it not be used for privacy-intruding purposes such as forging
-handwriting.
+Model weights
+-------------
+The package bundles the released InkSight-Small-p checkpoint
+(small-p-cpu, https://storage.googleapis.com/derendering_model/small-p-cpu.zip,
+also https://huggingface.co/Derendering/InkSight-Small-p) in compressed form
+under src/inksight/vendor/model, unmodified. The authors release the model,
+the supplementary derendering dataset and the human-tracing data under
+Apache-2.0 for RESEARCH, NON-COMMERCIAL use only, because they derive from
+non-commercial research datasets. The model card also asks that it not be used
+for privacy-intruding purposes such as forging handwriting. These terms apply
+to the bundled weights and to ink produced with them.
 
 This is not an officially supported Google product.

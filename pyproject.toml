@@ -1,42 +1,58 @@
 [build-system]
-requires = ["hatchling>=1.18"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "inksight-api"
-version = "0.1.0"
-description = "Object-oriented, extensible Python API around Google Research's InkSight handwriting derendering model"
+name = "inksight"
+version = "0.2.0"
+description = "Class-based Python wrapper around Google Research's InkSight handwriting derendering model (Mitrevski et al., TMLR 2025), model included."
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
-license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
-dependencies = ["numpy>=1.24", "pillow>=10.0"]
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "numpy",
+    "Pillow",
+]
 
 [project.optional-dependencies]
-# Rendering, animation and the 3-panel page figure.
-viz = ["matplotlib>=3.6"]
-# TensorFlow runtime for the released Small-p checkpoint (versions follow the
-# official notebook). tensorflow-text has no Windows wheels after 2.10, so it is
-# skipped there; see README "Windows" for what that means.
-# For a GPU install on Linux use:  pip install "tensorflow[and-cuda]==2.20.0"
+# Run the model in this environment (versions follow the official notebook).
+# tensorflow-text has no Windows wheels after 2.10; there the graph's tokenizer
+# ops are swapped for the sentencepiece package instead (see README).
 tf = [
-    "tensorflow==2.20.0",
-    "tensorflow-text==2.20.1; sys_platform != 'win32'",
+    "tensorflow==2.20.0; python_version < '3.14'",
+    "tensorflow-text==2.20.1; sys_platform != 'win32' and python_version < '3.14'",
     "sentencepiece>=0.2.1",
 ]
-# Only for loading from the Hugging Face Hub instead of a zip / folder.
-hub = ["huggingface_hub>=0.23", "tf-keras==2.20.1"]
-# Word segmentors for full-page conversion (pick one or both).
-tesseract = ["pytesseract>=0.3.13"]          # also needs the `tesseract-ocr` system package
-doctr = ["python-doctr[tf]==0.10.0"]
-all = ["inksight-api[viz,tf,hub,tesseract,doctr]"]
-dev = ["pytest>=7", "matplotlib>=3.6"]
+# Word detectors for full pages (pick one or more).
+doctr = ["python-doctr>=1.0"]                                   # the notebook's engine (PyTorch build)
+paddle = ["paddlepaddle>=3.0", "paddleocr>=3.0"]                 # newer: PP-OCR
+tesseract = ["pytesseract>=0.3.13"]                              # also needs the tesseract program
+all = ["inksight[tf,doctr,paddle,tesseract]"]
+
+[dependency-groups]
+dev = ["pytest"]
 
 [project.scripts]
-inksight = "inksight_api.cli:main"
+inksight = "inksight.__main__:main"
+inksight-model = "inksight.worker:cli"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/inksight_api"]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# The compressed model and the Docker build glue travel with the package, so
+# the model runs - locally or in a container - from an installed copy.
+inksight = [
+    "docker/*",
+    "vendor/*.md",
+    "vendor/model/*",
+    "vendor/examples/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "model: runs the InkSight model (TensorFlow here, or Docker)",
+    "ocr: needs an optional OCR engine (docTR, PaddleOCR or Tesseract)",
+]

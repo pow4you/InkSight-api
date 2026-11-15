@@ -1,219 +1,342 @@
-# inksight-api
+# inksight
+---
 
-An object-oriented, extensible Python API around Google Research's
-[InkSight](https://github.com/google-research/inksight) (offline-to-online handwriting
-conversion). It is a restructured port of the official `colab.ipynb`: same model, same
-prompts, same pre- and post-processing, organised into layers with documented extension points.
+Handwriting to pen strokes with InkSight: **an image goes in, strokes come out.**
+
+`inksight` is a small, class-based Python API around the model Google Research
+released with *InkSight: Offline-to-Online Handwriting Conversion by Teaching
+Vision-Language Models to Read and Write* (Mitrevski et al., TMLR 2025). It
+wraps the authors' model - it does not re-implement it - and the model ships
+with the package. It hides everything the official notebook expects you to do
+by hand (downloading and unzipping the checkpoint, TensorFlow setup, padding
+word crops, prompts, token decoding, mapping strokes back, finding the words
+on a page).
+
+| Method | Class | What it does |
+|--------|-------|--------------|
+| `"word"` | `InkSightWord` | the image shows one word; it goes to the model as it is |
+| `"page"` | `InkSightPage` | a word detector (docTR, PaddleOCR or Tesseract) finds the words, the model derenders each |
+
+```python
+import inksight
+
+drawing = inksight.vectorize("page.png", method="page")   # a path, a NumPy array or a PIL image
+
+for stroke in drawing:        # each stroke: (N, 2) float array of x, y pixel coordinates
+    print(stroke.shape)
+
+drawing.text                  # what the model read
+drawing.save("page.svg")
+```
+
+The API is the same as [`polyvec`](../PolyVector-api)'s: `vectorize()`,
+`VectorDrawing`, a `Vectorizer` hierarchy with a registry, runners for "here"
+and "in Docker", a two-stage method whose first stage (there keypoints, here
+word boxes) can be run, saved and passed back on its own.
 
 ## Install
 
+The project is set up for [uv](https://docs.astral.sh/uv/) (Python 3.10-3.13
+for TensorFlow):
+
 ```bash
-pip install -e ".[all]"          # everything
-pip install -e ".[tf,viz]"       # model + plotting, no OCR (word-level only)
-pip install -e .                 # data model, InkML/SVG only (NumPy + Pillow)
+uv sync --extra tf --extra paddle     # model + PaddleOCR word detector, plus pytest
 ```
+
+or, with plain pip: `pip install -e ".[tf,paddle]"`.
 
 | Extra | Installs | Needed for |
-|---|---|---|
-| `tf` | TensorFlow 2.20, sentencepiece, tensorflow-text (not on Windows) | running the model |
-| `hub` | huggingface_hub, tf-keras | loading from the Hugging Face Hub instead of a zip |
-| `viz` | matplotlib | plots, animations |
-| `tesseract` | pytesseract (plus the `tesseract-ocr` system package) | full pages |
-| `doctr` | python-doctr | full pages |
+|-------|----------|------------|
+| (none) | NumPy, Pillow | the API itself, and running the model through Docker |
+| `tf` | TensorFlow 2.20, sentencepiece, tensorflow-text (not on Windows) | running the model in this Python |
+| `doctr` | python-doctr 1.x (PyTorch) | the notebook's word detector (default for pages) |
+| `paddle` | paddlepaddle 3, paddleocr 3 | the newer PP-OCR word detector |
+| `tesseract` | pytesseract (plus the `tesseract` program) | a lightweight word detector |
 
-Videos (`.mp4`) need `ffmpeg`; GIFs do not. Python 3.10 to 3.13.
+### The model
 
-## Where the model comes from
+The released InkSight-Small-p checkpoint (a 692 MB TensorFlow SavedModel) is
+part of the package, xz-compressed to 461 MB and split into five parts below
+100 MB (`src/inksight/vendor/model`). It is unpacked on first use - about
+20 seconds, once - into the per-user data directory (`%LOCALAPPDATA%\inksight`,
+`~/.local/share/inksight`, or `$INKSIGHT_HOME`) and reused afterwards; the
+archive's SHA-256 is verified while unpacking. Nothing is downloaded.
+
+```bash
+python -m inksight build --local    # unpack now instead of on the first call
+python -m inksight info             # shows the methods, the model and which runners are ready
+```
+
+### Where the model runs
+
+* **Locally (default when TensorFlow is installed).** `LocalRunner` loads the
+  model into the calling Python process once (about 6 s) and keeps it.
+* **Docker (default when TensorFlow is not installed).** With Docker running,
+  the first call builds an `inksight-backend` image (Linux, TensorFlow with
+  tensorflow-text, the model unpacked; a few minutes, once) and every call
+  after that runs in a throw-away, network-less container. Nothing to install
+  but Docker; each call also pays the model loading.
+
+**Speed.** The model writes its answer one ink token at a time, and a word
+takes a few hundred tokens. On a desktop CPU (measured: Ryzen 7 5800X) that is
+roughly 0.6-0.9 s per token - **3 to 5 minutes per call**, whether the call
+holds one word or a batch of 32 (words are batched, up to `batch_size`). The
+weights are bfloat16, which CPUs without native bfloat16 support compute
+slowly. A GPU (Linux: `pip install "tensorflow[and-cuda]==2.20.0"`) is the way
+to make it fast; the authors' notebook targets one too.
+
+### Windows
+
+TensorFlow 2.20 has native Windows CPU wheels and the model's XLA-compiled core
+runs on them. The one missing piece is `tensorflow-text`, which has no Windows
+wheels after 2.10: the graph tokenizes its prompt and output with three of its
+SentencePiece ops (`SentencepieceOp`, `SentencepieceTokenizeOp`,
+`SentencepieceDetokenizeOp`). Nothing else in the graph needs it.
+
+So when `tensorflow-text` is missing, the graph is rewritten once
+(`src/inksight/tokenizer_patch.py`): the three ops become calls into the
+`sentencepiece` Python package - the same tokenizer library - with the
+tokenizer model embedded in the graph and the same arguments the ops received.
+The rewritten copy sits next to the unpacked model as `small-p-cpu.sentencepiece`
+(weights hard-linked, not copied). On Linux both routes are available, and the
+test suite checks that they give identical answers. Force either route with
+`LocalRunner(tokenizer="sentencepiece")` or `tokenizer="tensorflow-text"`.
+
+## Usage
+
+### One call
 
 ```python
-InkSight.from_pretrained()                                # downloads the authors' small-p-cpu.zip
-InkSight.from_pretrained("C:/models/small-p-cpu.zip")     # a zip you already have
-InkSight.from_pretrained("https://.../small-p-cpu.zip")   # any zip URL
-InkSight.from_pretrained("models/small-p-cpu")            # an unpacked SavedModel folder
-InkSight.from_pretrained("Derendering/InkSight-Small-p")  # Hugging Face (needs the hub extra)
+import numpy as np, inksight
+
+image = np.asarray(...)                                     # (H, W), (H, W, 3) or (H, W, 4)
+drawing = inksight.vectorize(image, method="word")
+drawing = inksight.vectorize("page.jpg", method="page", word_detector="paddleocr")
 ```
 
-Zips are unpacked once into `~/.cache/inksight_api` (override with `INKSIGHT_CACHE` or
-`cache_dir=`) and reused. The zip and folder routes need only TensorFlow. If the default
-zip cannot be downloaded, the Hugging Face repository is tried.
+### Reusable objects
 
-## Windows
-
-The released graph tokenizes its text input and output with three SentencePiece ops
-that only `tensorflow-text` provides, and that package has no Windows wheels after
-version 2.10 (2022). Nothing else in the graph needs it.
-
-So when `tensorflow-text` is not installed, the package rewrites the graph once: those
-three ops are replaced by calls into the `sentencepiece` Python package (the same
-tokenizer library, available on every platform), using the tokenizer model that is
-embedded in the graph. The rewritten copy is stored next to the original as
-`<model folder>.sentencepiece` and reused; the weights are hard-linked, not copied.
-
-```powershell
-pip install -e ".[tf,viz]"
-```
+Create a vectorizer once when processing several images; the model (local
+runner) and the word detector then stay loaded.
 
 ```python
-from inksight_api import InkSight
+from inksight import InkSightPage, InkSightWord
 
-kit = InkSight.from_pretrained()        # or a path to small-p-cpu.zip / the unpacked folder
-paths = kit.convert_word("word.jpg", mode="vanilla").ink.to_polylines()
+word = InkSightWord(mode="vanilla")
+page = InkSightPage(word_detector="paddleocr")
+
+for path in paths:
+    page.vectorize(path).save(path.with_suffix(".svg"))
 ```
 
-You can force either route on any platform with
-`InkSight.from_pretrained(..., tokenizer="sentencepiece")` or `tokenizer="tensorflow-text"`.
-
-One thing this does not change: the model core was exported from JAX and must be
-compiled by TensorFlow's XLA compiler at run time. If the Windows build of TensorFlow
-cannot do that, the first call fails with an XLA error, and the remaining options are
-WSL2 (Linux inside Windows, where `pip install -e ".[all]"` works as is) or Docker.
-
-## Docker
-
-```powershell
-docker build -t inksight .
-
-# one word -> stroke paths as JSON (run from the folder with your images)
-docker run --rm -v inksight-cache:/cache -v "${PWD}:/work" inksight word.jpg -o word.json
-
-# a full page -> SVG, plus the 3-panel figure
-docker run --rm -v inksight-cache:/cache -v "${PWD}:/work" inksight page.jpg --page -o page.svg --figure result.jpg
-```
-
-The `inksight-cache` volume keeps the downloaded model and docTR weights between runs.
-The image is CPU only. In `cmd.exe` use `%cd%` instead of `${PWD}`. For a Python shell in
-the container: `docker run --rm -it -v inksight-cache:/cache -v "${PWD}:/work" --entrypoint python inksight`.
-
-## Command line
-
-```
-inksight IMAGE [--page] [--mode vanilla|r+d|d+t] [--text WORD] [--model SOURCE]
-               [--segmenter doctr|tesseract] [-o FILE] [--figure FILE]
-```
-
-Without `-o` it prints JSON to stdout: `{"text": ..., "strokes": [[[x, y], ...], ...]}`.
-With `-o` the suffix picks the format (`.json`, `.svg`, `.inkml`). The default mode is
-`vanilla`, which involves no text. `--model` takes the same sources as `from_pretrained`.
-
-## Quick start
+### The result: `VectorDrawing`
 
 ```python
-from inksight_api import InkSight, write_ink
-
-kit = InkSight.from_pretrained(segmenter="doctr")   # downloads small-p-cpu.zip on first use
-
-word = kit.convert_word("word.jpg")                 # one word per image
-page = kit.convert_page("page.jpg")                 # segment -> derender -> stitch
-
-page.ink            # Ink in source-image pixels
-page.text           # recognised text
-page.words[0]       # per word: box, model input, raw output, ink
-
-write_ink(page.ink, "page.svg")                     # or .inkml, .json
-page.plot()                                         # needs the viz extra
+drawing.strokes        # list of (N, 2) float arrays: x right, y down, in input pixels
+drawing.width, drawing.height
+len(drawing), drawing.num_points, drawing.lengths()
+drawing.text           # recognised text (recognize-and-derender mode)
+drawing.to_svg(stroke="black", stroke_width=1.5)        # SVG text
+drawing.save("out.svg")
+drawing.metadata       # {"elapsed", "runner", "tokenizer", "mode", "text", "words": [...]}
+drawing.metadata["words"][0]   # {"box", "text", "ocr_text", "raw", "prompt", "fallback", "strokes": (start, stop)}
 ```
 
-`ink.to_polylines()` gives plain `(N, 2)` NumPy arrays per stroke, for anything
-downstream that wants paths (plotters, G-code, your own SVG).
+The centre of the pixel in row `i`, column `j` is the point `(j + 0.5, i + 0.5)`.
+Strokes are in writing order; a stroke can be a single point (the dot of an i).
 
-Do not `import tensorflow` yourself before loading the model. The released checkpoint
-needs two XLA flags that only apply if set before TensorFlow's first import; the package
-sets them when it imports TensorFlow. If you must import TensorFlow first, call
-`inksight_api.models.configure_tensorflow()` before that.
+### Word boxes (full pages)
 
-## Layers
-
-| Package | Contents | Extension point |
-|---|---|---|
-| `core` | `Stroke`, `Ink` (immutable, NumPy-backed), `BoundingBox`, `CropTransform`, `InferenceMode`, `InkTokenizer` | |
-| `imaging` | `load_image`, `SquarePadPreprocessor`, `PadColor` | subclass `ImagePreprocessor` |
-| `segmentation` | `TesseractSegmenter`, `DoctrSegmenter`, `WholeImageSegmenter` | subclass `WordSegmenter`, `@segmenters.register` |
-| `models` | `InkSightModel`, `TFSavedModelBackend`, `ModelOutput` | subclass `ModelBackend`, `@backends.register` |
-| `pipeline` | `InkPipeline`, `WordInkPipeline`, `PageInkPipeline`, results | override `_segment`, `_prepare`, `_infer`, `_to_source` |
-| `visualization` | `plot_ink`, `plot_page_result`, `InkAnimator`, `RainbowInkRenderer` | subclass `InkRenderer`, `@renderers.register` |
-| `io` | `read_ink`, `write_ink` (InkML and JSON in/out, SVG out) | subclass `InkReader` / `InkWriter`, register by suffix |
-| `datasets` | `SupplementaryDataset` (the `derendering_supp.zip` release) | |
-
-Each layer imports only from the ones above it. Heavy dependencies load lazily, so
-`import inksight_api` does not pull in TensorFlow or matplotlib.
-
-## Extending
-
-A segmentor, registered by name:
+InkSight derenders one word at a time. `InkSightPage.vectorize()` finds the
+words and derenders them, but each stage is reachable on its own:
 
 ```python
-from inksight_api import BoundingBox, InkSight
-from inksight_api.segmentation import WordBox, WordSegmenter, segmenters
+from inksight import InkSightPage, Words
 
-@segmenters.register("halves")
-class HalvesSegmenter(WordSegmenter):
-    def segment(self, image):
-        half = image.width // 2
-        return [WordBox(BoundingBox(0, 0, half, image.height)),
-                WordBox(BoundingBox(half, 0, half, image.height))]
+page = InkSightPage(word_detector="paddleocr")
+words = page.detect_words("page.png")                    # stage 1 only
+words.boxes, words.texts                                 # (N, 4) x0, y0, x1, y1   and   N strings
+words.save("page.words.json")
 
-kit = InkSight.from_pretrained(segmenter="halves")
+drawing = page.vectorize("page.png", words=words)               # stage 2 with given boxes
+drawing = page.vectorize("page.png", words="page.words.json")   # ... or a saved file
+drawing = page.vectorize("page.png", words=np.array([[x0, y0, x1, y1], ...]))
 ```
 
-A model runtime is one method:
+| Detector | Name | Notes |
+|----------|------|-------|
+| `DoctrWordDetector` | `"doctr"` (default) | what the official notebook uses; boxes grown by 10 % |
+| `PaddleOCRWordDetector` | `"paddleocr"` | PaddleOCR 3 / PP-OCR: text lines plus the recogniser's word positions; `level="line"` derenders whole lines. Downloads its models on first use. On Windows oneDNN is switched off (Paddle 3 bug). |
+| `TesseractWordDetector` | `"tesseract"` | needs the `tesseract` program |
+| `WholeImageDetector` | `"whole"` | the image is one word |
+
+### Options
+
+| Option | Applies to | Meaning |
+|--------|-----------|---------|
+| `runner` | both | `"auto"` (TensorFlow here if installed, else Docker), `"local"`, `"docker"`, or a `Runner` object |
+| `mode` | both | `"r+d"` recognize and derender (default, as in the notebook), `"vanilla"` no text involved, `"d+t"` derender the given text |
+| `fallback_mode` | both | retried for words that come back without strokes (default `"vanilla"`, as in the notebook; `None` disables) |
+| `batch_size` | both | words per forward pass (32) |
+| `invert` | both | set for light-on-dark writing |
+| `timeout` | both | abort the model after this many seconds (Docker runner; the local runner cannot abort in-process work) |
+| `workdir` | both | keep the staged word images, `job.json`, the raw `output.json` and `log.txt` in this folder (debugging) |
+| `word_detector` | page | a `WordDetector` or its name |
+
+`vectorize()` on `InkSightWord` takes `text=` (for `"d+t"`); on `InkSightPage`
+it takes `words=`. After a call, `vectorizer.last_run.output` holds the model
+program's log. If the model fails, a `VectorizationError` is raised with the
+log in `.log`.
+
+### Command line
+
+```bash
+python -m inksight vectorize page.png -o page.svg                  # page, docTR
+python -m inksight vectorize page.png -d paddleocr -o page.json    # strokes + text as JSON
+python -m inksight vectorize word.png -m word --mode vanilla
+python -m inksight words page.png -d paddleocr -o page.words.json
+python -m inksight vectorize page.png -w page.words.json
+python -m inksight build --docker        # or --local, or --bundle model/small-p-cpu
+```
+
+## Design
+
+```
+Vectorizer                    abstract: image in -> VectorDrawing out
+└── ModelVectorizer           abstract: ... by running the InkSight model
+    ├── InkSightWord          the image is one word
+    └── InkSightPage          ── has a ──┐
+                                         ▼
+WordDetector                  abstract: image in -> Words out
+├── DoctrWordDetector         the notebook's engine
+├── PaddleOCRWordDetector     PP-OCR (newer)
+├── TesseractWordDetector
+└── WholeImageDetector
+
+Runner                        abstract: execute the model program in a directory
+├── LocalRunner               TensorFlow in this process (model kept loaded)
+└── DockerRunner              a container; builds its image on demand
+```
+
+Each level adds one responsibility and leaves one method to the level below:
+
+* **`Vectorizer`** (`src/inksight/base.py`) fixes the public contract.
+  `vectorize()` is a template method - load any image form as 8-bit RGB,
+  `preprocess()`, `_vectorize()`, `postprocess()` - and subclasses that set a
+  `name` register themselves for `inksight.vectorize(..., method=name)` and the
+  command line.
+* **`ModelVectorizer`** (`src/inksight/model.py`) owns the plumbing around the
+  model: cropping and padding each region to the 224 x 224 input, prompts and
+  the fallback policy, a scratch directory with the inputs as files, invoking
+  the model program through a runner, decoding the ink tokens and mapping the
+  strokes back. A concrete method only implements `_stage()`, which says which
+  regions to derender.
+* **`InkSightWord` / `InkSightPage`** (`src/inksight/methods/`) are therefore
+  tiny: the word method is one line of substance; the page method adds the
+  word-detection stage.
+* **`Runner`** (`src/inksight/runners/`) decouples *what* runs from *where*. The
+  model program (`inksight-model`, `src/inksight/worker.py`) always runs inside
+  a directory with bare file names as arguments (`job.json` + word PNGs in,
+  `output.json` out), so the same call works in-process, in Docker, or
+  wherever a new runner sends it.
+
+### Repository layout
+
+```
+src/inksight/
+├── base.py, model.py           the two abstract levels
+├── methods/                    InkSightWord, InkSightPage
+├── words/                      Words, WordDetector, docTR / PaddleOCR / Tesseract
+├── runners/                    LocalRunner, DockerRunner
+├── worker.py                   the model program (inksight-model)
+├── drawing.py, images.py       result type, image loading, word-crop padding
+├── prompts.py, tokens.py       inference modes, ink-token decoding
+├── bundle.py, tokenizer_patch.py   the compressed model; running it without tensorflow-text
+├── build.py, __main__.py       backend preparation, command line
+├── docker/                     Dockerfile of the backend image          (ours)
+└── vendor/                     the released model, compressed            (theirs, unmodified)
+tests/      examples/
+```
+
+### Extending
+
+**A new way of choosing regions** - subclass `ModelVectorizer`:
 
 ```python
-from inksight_api import InkSightModel, ModelBackend
+from inksight import ModelVectorizer, ModelJob, Words
 
-class MyBackend(ModelBackend):
-    def generate(self, images, prompts):   # -> one decoder string per image
-        ...
+class Lines(ModelVectorizer):
+    name = "lines"               # registers it: inksight.vectorize(img, method="lines")
 
-model = InkSightModel(MyBackend())
+    def _stage(self, rgb, **inputs):
+        rows = ...               # find text lines somehow
+        return ModelJob(Words(boxes=rows))
 ```
 
-One pipeline stage, leaving the others alone:
+**A different word detector** - subclass `WordDetector`, implement
+`detect(image) -> Words`, give it a `name` to select it by name, or pass an
+instance as `InkSightPage(word_detector=...)`.
 
-```python
-from inksight_api import PageInkPipeline
+**A different place to run** (a GPU box over SSH, a job queue) - subclass
+`Runner`, implement `is_available()` and `run()`, pass it as `runner=...`.
 
-class ConfidentWordsOnly(PageInkPipeline):
-    def _segment(self, image):
-        return [w for w in super()._segment(image) if (w.confidence or 0) > 0.5]
-```
+**Different pre/post-processing** - override `preprocess(rgb)` or
+`postprocess(drawing)` on any vectorizer.
 
-## Inference modes
+## What is wrapped, and how faithfully
 
-| `InferenceMode` | alias | prompt |
-|---|---|---|
-| `VANILLA` | `vanilla` | `Derender the ink.` |
-| `RECOGNIZE_AND_DERENDER` (default) | `r+d` | `Recognize and derender.` |
-| `DERENDER_WITH_TEXT` | `d+t` | `Derender the ink: <text>` |
+* **Model**: the authors' `small-p-cpu` SavedModel, byte for byte (see
+  [`src/inksight/vendor/UPSTREAM.md`](src/inksight/vendor/UPSTREAM.md)).
+* **Pre-processing**: the notebook's: crop, scale to fit 224 x 224 keeping the
+  aspect ratio, centre on black, JPEG-encode; the notebook's XLA flags are set
+  before TensorFlow is imported.
+* **Prompts, decoding, fallback**: the notebook's three prompts, its
+  `detokenize`, and its retry of empty words with the vanilla prompt (batched
+  here instead of one call per word).
+* **Page flow**: docTR with boxes grown by 10 %, as in the notebook - but
+  docTR's PyTorch build (1.x): its TensorFlow build, which the notebook used,
+  ended with 0.10, and that cannot load its weights under TensorFlow 2.20.
+  PaddleOCR and Tesseract are additions.
+* **Tokenizer**: the graph as exported where tensorflow-text exists (Linux,
+  the Docker image); on Windows the rewritten graph described above.
+* **Coordinates**: the model's coordinates are pixel indices of its input;
+  they are shifted by half a pixel to the pixel-centre convention above.
+* Not kept from the previous version of this package: the InkML/JSON readers
+  and writers, plotting and animation, and the dataset loaders.
 
-Words that come back empty are retried once, as a single batch, with `VANILLA`
-(`InkSightModel(..., fallback_mode=None)` turns that off).
+### Platform support
 
-## Differences from the notebook
-
-- The four duplicated pad/scale helpers are one `SquarePadPreprocessor`; the
-  `(ratio, dx, dy, min_x, min_y, angle)` tuple is a `CropTransform`. The rotation angle,
-  hard-coded to 0 in the notebook, is not modelled.
-- Fallback retries are batched instead of one call per empty word.
-- docTR's predictor is built once and reused (the notebook rebuilt it per page).
-- GIFs are written with Pillow instead of ImageMagick.
-- Sample ids use the file stem. The notebook's `name.strip('.png')` also strips leading
-  and trailing `p`, `n`, `g` characters from ids.
-- The human-tracing `.npy` is read with a restricted unpickler that only accepts NumPy
-  arrays and classes named `Ink` / `Stroke`, instead of `np.load(allow_pickle=True)`.
-- Without `tensorflow-text`, the graph's SentencePiece ops are swapped for the
-  `sentencepiece` package (see "Windows"). With it installed, the graph runs as exported.
-- `ink.text` after *recognize and derender* is the decoder output with ink tokens removed.
-  The notebook never reads the text, so treat this as best effort.
+| Platform | Docker runner | Local runner |
+|----------|---------------|--------------|
+| Windows 11 | **tested** (Docker Desktop, Python 3.13) | **tested** (Python 3.13, TensorFlow 2.20 CPU, sentencepiece route) |
+| Linux | **tested** inside a Linux container (`tests/docker/Dockerfile`); not run from a Linux host | **tested** in that container (Python 3.12, tensorflow-text route) |
+| macOS | not tested | not tested |
 
 ## Tests
 
 ```bash
-pip install -e ".[dev]" && pytest
+uv run pytest                              # unit tests always run; model tests need a runner
+INKSIGHT_RUNNER=docker uv run pytest       # model tests through the Docker image
+docker build -f tests/docker/Dockerfile -t inksight-tests . && docker run --rm inksight-tests   # Linux
 ```
 
-The suite uses a fake backend and fake segmentors, so it runs without TensorFlow or OCR.
+Tests that need the model or an OCR engine skip themselves when those are missing.
 
-## Licence
+## Licence and citation
 
-Apache-2.0; original notebook code Copyright 2024 Google LLC (see `NOTICE`). The model
-weights and dataset are released by the authors for research, non-commercial use only.
+The wrapper code is Apache-2.0 (see `LICENSE` and `NOTICE`; the original
+notebook code is Copyright 2024 Google LLC). The bundled model weights are
+released by the authors for **research, non-commercial use only**, and the
+model card asks that they not be used for privacy-intruding purposes such as
+forging handwriting. If you use the model, cite the paper:
+
+```bibtex
+@article{mitrevski2025inksight,
+  title   = {InkSight: Offline-to-Online Handwriting Conversion by Teaching
+             Vision-Language Models to Read and Write},
+  author  = {Mitrevski, Blagoj and Rak, Arina and Schnitzler, Julian and Li, Chengkun
+             and Maksai, Andrii and Berent, Jesse and Musat, Claudiu},
+  journal = {Transactions on Machine Learning Research},
+  year    = {2025}
+}
+```

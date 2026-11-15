@@ -1,6 +1,10 @@
 __pycache__/
+*.py[cod]
 *.egg-info/
 .pytest_cache/
-dist/
 build/
-derendering_supp*
+dist/
+.venv/
+# The uncompressed SavedModel; the package carries it compressed in
+# src/inksight/vendor/model (python -m inksight build --bundle model/small-p-cpu).
+model/
