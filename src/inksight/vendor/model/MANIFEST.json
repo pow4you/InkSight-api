@@ -1,0 +1,41 @@
+{
+  "name": "small-p-cpu",
+  "format": "tar.xz",
+  "source": "https://storage.googleapis.com/derendering_model/small-p-cpu.zip",
+  "sha256": "816ce8a2c041189ffecad6ad38eb3b3bc20ae9ee904493242f6e539fb91c9630",
+  "size": 461061388,
+  "unpacked_size": 692090179,
+  "files": [
+    "fingerprint.pb",
+    "saved_model.pb",
+    "variables/variables.data-00000-of-00001",
+    "variables/variables.index"
+  ],
+  "parts": [
+    {
+      "file": "small-p-cpu.tar.xz.000",
+      "size": 99614720,
+      "sha256": "f3d4b0a3e5286bc236458b4b5188a6b235dbed3f35156a67d6b878cad1c5fd18"
+    },
+    {
+      "file": "small-p-cpu.tar.xz.001",
+      "size": 99614720,
+      "sha256": "98d53b45d0a3d892426560395367aa8a0d7ad37d1742ace6357aa3619cb95a94"
+    },
+    {
+      "file": "small-p-cpu.tar.xz.002",
+      "size": 99614720,
+      "sha256": "76895145ea14e3754ddbfa025ccaebbd283dc1f7d659ed054b901c7160593897"
+    },
+    {
+      "file": "small-p-cpu.tar.xz.003",
+      "size": 99614720,
+      "sha256": "35e41d51b35f5cfecd747da27b3038acfacbfe9f705b11727030a53599cbe48a"
+    },
+    {
+      "file": "small-p-cpu.tar.xz.004",
+      "size": 62602508,
+      "sha256": "b2c8d9f92e79cfe71a394c7447eb67d9e47f7dc5ecc1908e8b704dc276c0518f"
+    }
+  ]
+}

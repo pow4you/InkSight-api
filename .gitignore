@@ -7,4 +7,4 @@ dist/
 .venv/
 # The uncompressed SavedModel; the package carries it compressed in
 # src/inksight/vendor/model (python -m inksight build --bundle model/small-p-cpu).
-model/
+/model/
