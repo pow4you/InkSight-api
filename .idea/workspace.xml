@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="bf9c7551-7ed8-4cc8-a893-3142ac8f7433" name="Changes" comment="small refactor">
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;pow4you&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/pow4you/inksight-api.git&quot;,
+    &quot;accountId&quot;: &quot;1151ae86-3f94-4d96-9144-00b8d6c6f6f8&quot;
+  }
+}</component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0000001369355147" />
+      <entry key="MS500" value="1.042477848930934" />
+      <entry key="S2" value="1.5834357784067659" />
+      <entry key="S5" value="2.3792031070453756" />
+      <entry key="S10" value="2.9883137695310475" />
+      <entry key="S30" value="3.6023697124636787" />
+      <entry key="S60" value="3.7924352601163873" />
+      <entry key="M2" value="3.906636355752866" />
+      <entry key="M5" value="4.350380265223751" />
+      <entry key="M10" value="5.591571799923192" />
+      <entry key="M15" value="6.682045071299891" />
+      <entry key="M30" value="8.593881270438535" />
+      <entry key="H1" value="10.0499995199491" />
+      <entry key="H2" value="10.953557731616918" />
+      <entry key="H4" value="11.457534122795709" />
+      <entry key="D1" value="11.906789695048404" />
+      <entry key="W1" value="11.986613974374915" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.9526381312349433" />
+      <entry key="MS500" value="1.0325844669681672" />
+      <entry key="S2" value="1.57978560652166" />
+      <entry key="S5" value="2.376747842604609" />
+      <entry key="S10" value="2.986687414551476" />
+      <entry key="S30" value="3.601693596494286" />
+      <entry key="S60" value="3.7920765204108857" />
+      <entry key="M2" value="3.9064489197488053" />
+      <entry key="M5" value="4.350254203223637" />
+      <entry key="M10" value="5.591401961837685" />
+      <entry key="M15" value="6.681862409494913" />
+      <entry key="M30" value="8.593726168674376" />
+      <entry key="H1" value="10.04989700293386" />
+      <entry key="H2" value="10.953498630318977" />
+      <entry key="H4" value="11.457502372056043" />
+      <entry key="D1" value="11.906784075250048" />
+      <entry key="W1" value="11.986613163205687" />
+    </decayedShown>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 3,
+  &quot;fromUser&quot;: false
+}</component>
+  <component name="ProjectId" id="3M6yYvTWdSrqIudzXDsJ4eJvQ6R" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/morpl/PycharmProjects/inksight-api/model&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;python.packages.toolwindow.project.migrated.to.right.top.v2&quot;: &quot;true&quot;
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\morpl\PycharmProjects\inksight-api\model" />
+      <recent name="C:\Users\morpl\PycharmProjects\inksight-api" />
+    </key>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-34611be1ca5a-e0583fc556d1-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-263.7307.206" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="bf9c7551-7ed8-4cc8-a893-3142ac8f7433" name="Changes" comment="" />
+      <created>1794685364300</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1794685364300</updated>
+      <workItem from="1794685364300" duration="2546000" />
+      <workItem from="1794703135265" duration="13000" />
+      <workItem from="1794736941604" duration="4703000" />
+      <workItem from="1794769250293" duration="608000" />
+      <workItem from="1794945825736" duration="621000" />
+    </task>
+    <task id="LOCAL-00001" summary=":)">
+      <option name="closed" value="true" />
+      <created>1794685445689</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1794685445689</updated>
+    </task>
+    <task id="LOCAL-00002" summary="added model">
+      <option name="closed" value="true" />
+      <created>1794685959200</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1794685959200</updated>
+    </task>
+    <task id="LOCAL-00003" summary="small refactor">
+      <option name="closed" value="true" />
+      <created>1794742181364</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1794742181364</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value=":)" />
+    <MESSAGE value="added model" />
+    <MESSAGE value="small refactor" />
+    <option name="LAST_COMMIT_MESSAGE" value="small refactor" />
+  </component>
+</project>

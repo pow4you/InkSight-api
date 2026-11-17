@@ -1,0 +1,6 @@
+# The build glue is consumed inside a Linux container: keep it LF everywhere.
+src/inksight/docker/** text eol=lf
+
+# The compressed model and example images are binary.
+src/inksight/vendor/model/*.tar.xz.* binary
+*.png binary
