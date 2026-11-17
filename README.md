@@ -79,8 +79,9 @@ python -m inksight info             # shows the methods, the model and which run
 
 **Speed.** The model writes its answer one ink token at a time, and a word
 takes a few hundred tokens. On a desktop CPU (measured: Ryzen 7 5800X) that is
-roughly 0.6-0.9 s per token - **3 to 5 minutes per call**, whether the call
-holds one word or a batch of 32 (words are batched, up to `batch_size`). The
+roughly 0.6-0.9 s per token - **about 4 to 5 minutes per model call**. The
+words of a call are decoded together, `batch_size` (32) at a time, so a page
+costs little more than a single word. Expect about 7 GB of RAM in use. The
 weights are bfloat16, which CPUs without native bfloat16 support compute
 slowly. A GPU (Linux: `pip install "tensorflow[and-cuda]==2.20.0"`) is the way
 to make it fast; the authors' notebook targets one too.
@@ -165,8 +166,8 @@ drawing = page.vectorize("page.png", words=np.array([[x0, y0, x1, y1], ...]))
 
 | Detector | Name | Notes |
 |----------|------|-------|
-| `DoctrWordDetector` | `"doctr"` (default) | what the official notebook uses; boxes grown by 10 % |
-| `PaddleOCRWordDetector` | `"paddleocr"` | PaddleOCR 3 / PP-OCR: text lines plus the recogniser's word positions; `level="line"` derenders whole lines. Downloads its models on first use. On Windows oneDNN is switched off (Paddle 3 bug). |
+| `DoctrWordDetector` | `"doctr"` (default) | what the official notebook uses (docTR 1.x, PyTorch); boxes grown by 10 %. Runs in its own worker process (on Linux, PyTorch and TensorFlow abort in one process). |
+| `PaddleOCRWordDetector` | `"paddleocr"` | PaddleOCR 3 / PP-OCR: text lines plus the recogniser's word positions; `level="line"` derenders whole lines. Downloads its models on first use. Runs in its own worker process too (on Linux, Paddle segfaults if TensorFlow was loaded first); oneDNN is off (Paddle 3 bug). |
 | `TesseractWordDetector` | `"tesseract"` | needs the `tesseract` program |
 | `WholeImageDetector` | `"whole"` | the image is one word |
 
