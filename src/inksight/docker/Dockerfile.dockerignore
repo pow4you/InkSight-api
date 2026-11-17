@@ -1,0 +1,4 @@
+# The build context is the inksight/ package: keep caches and examples out.
+**/__pycache__
+**/*.pyc
+vendor/examples
