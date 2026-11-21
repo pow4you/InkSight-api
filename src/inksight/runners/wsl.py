@@ -5,7 +5,7 @@ passthrough.  AMD's ROCm stack does run inside WSL 2 (Radeon RX 7900 / 9000
 series and the matching Radeon PRO cards), with an official TensorFlow 2.20
 wheel - so the GPU route on Windows with an AMD card is: TensorFlow in a WSL
 distro, the model program started there through ``wsl.exe``.
-``scripts/setup-rocm-wsl.sh`` prepares such a distro.
+``python -m inksight build --rocm`` (``inksight/scripts/setup-rocm-wsl.sh``) prepares such a distro.
 """
 
 from __future__ import annotations
@@ -28,6 +28,17 @@ from .spool import ServerStopped, submit_job
 
 #: Seconds allowed for the availability probe.
 _PROBE_TIMEOUT = 60
+
+#: Runs ``inksight.worker`` from the package folder given as the first argument,
+#: without adding anything else to ``sys.path``.
+_BOOTSTRAP = (
+    "import importlib.util, sys; d = sys.argv[1]; "
+    "s = importlib.util.spec_from_file_location('inksight', d + '/__init__.py', "
+    "submodule_search_locations=[d]); m = importlib.util.module_from_spec(s); "
+    "sys.modules['inksight'] = m; s.loader.exec_module(m); "
+    "sys.argv = ['inksight-model'] + sys.argv[2:]; "
+    "from inksight.worker import cli; cli()"
+)
 
 
 def to_wsl_path(path: "os.PathLike[str] | str") -> str:
@@ -99,12 +110,14 @@ class WslRunner(Runner):
             command += ["-u", self.user]
         if cwd is not None:
             command += ["--cd", to_wsl_path(cwd)]
-        variables = {"PYTHONPATH": to_wsl_path(PACKAGE_DIR.parent), "TF_CPP_MIN_LOG_LEVEL": "2",
-                     **self.env}
+        variables = {"TF_CPP_MIN_LOG_LEVEL": "2", **self.env}
         if self.model_dir:
             variables["INKSIGHT_MODEL_DIR"] = self.model_dir
+        # Load the package by its own folder.  Putting its parent on PYTHONPATH
+        # would, for an installed copy, expose the whole Windows site-packages
+        # (Windows builds of numpy, Pillow, ...) to the Linux interpreter.
         command += ["--", "env", *(f"{k}={v}" for k, v in variables.items()),
-                    self.python, "-m", "inksight.worker", *program_args]
+                    self.python, "-c", _BOOTSTRAP, to_wsl_path(PACKAGE_DIR), *program_args]
         return command
 
     # ----------------------------------------------------------- availability
@@ -133,7 +146,7 @@ class WslRunner(Runner):
             where = f"WSL distro {self.distro!r}" if self.distro else "any WSL distro"
             raise BackendNotAvailableError(
                 f"{self.python} with TensorFlow was not found in {where}. Run "
-                "scripts/setup-rocm-wsl.sh inside the distro, or set INKSIGHT_WSL_DISTRO / "
+                "`python -m inksight build --rocm`, or set INKSIGHT_WSL_DISTRO / "
                 "INKSIGHT_WSL_PYTHON (distros: "
                 f"{', '.join(self.list_distros()) or 'none'}).")
 

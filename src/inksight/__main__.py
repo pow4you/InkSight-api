@@ -114,6 +114,18 @@ def _cmd_build(args: argparse.Namespace) -> int:
     elif args.local:
         path = prepare_local(model_dir=args.model_dir, tokenizer=args.tokenizer)
         print(f"local model ready: {path}")
+    elif args.rocm:
+        import subprocess
+        from .paths import ROCM_SETUP_SCRIPT
+        from .runners.wsl import to_wsl_path
+        command = ["wsl.exe", "-d", args.distro, "-u", "root", "--",
+                   "bash", to_wsl_path(ROCM_SETUP_SCRIPT)]
+        print("running:", " ".join(command))
+        returncode = subprocess.run(command).returncode
+        if returncode != 0:
+            print(f"error: the ROCm setup exited with status {returncode}", file=sys.stderr)
+            return 1
+        print(f"ROCm runner ready in WSL distro {args.distro}: use runner='rocm'")
     else:
         runner = DockerRunner(gpus="all" if args.gpu else None)
         image = build_docker_image(runner.image, build_args=runner.build_args, quiet=False)
@@ -147,7 +159,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
         print("wsl / rocm runner:")
         print(f"  ready: {wsl.describe()}" if wsl.is_available()
               else f"  not available ({wsl.python} with TensorFlow not found in any WSL distro; "
-                   "see scripts/setup-rocm-wsl.sh)")
+                   "set one up with: python -m inksight build --rocm)")
     return 0
 
 
@@ -206,6 +218,11 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="unpack the bundled model (and rewrite its tokenizer if needed) now")
     what.add_argument("--bundle", metavar="SAVED_MODEL_DIR",
                       help="compress a SavedModel folder into the package")
+    what.add_argument("--rocm", action="store_true",
+                      help="Windows + AMD GPU: install ROCm and TensorFlow into a WSL distro "
+                           "for --runner rocm (several GB)")
+    build.add_argument("--distro", default="Ubuntu-24.04",
+                       help="--rocm: the WSL distro to set up (default: Ubuntu-24.04)")
     build.add_argument("--gpu", action="store_true",
                        help="--docker: build the CUDA image used by --runner docker-gpu")
     build.add_argument("--model-dir", help="--local: use this SavedModel instead of the bundle")

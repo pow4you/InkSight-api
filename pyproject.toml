@@ -44,6 +44,7 @@ where = ["src"]
 # the model runs - locally or in a container - from an installed copy.
 inksight = [
     "docker/*",
+    "scripts/*",
     "vendor/*.md",
     "vendor/model/*",
     "vendor/examples/*",

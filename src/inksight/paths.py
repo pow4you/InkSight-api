@@ -12,6 +12,10 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 #: Dockerfile of the backend image.
 DOCKER_DIR = PACKAGE_DIR / "docker"
 
+#: Helper scripts that travel with the package (the ROCm-in-WSL setup).
+SCRIPTS_DIR = PACKAGE_DIR / "scripts"
+ROCM_SETUP_SCRIPT = SCRIPTS_DIR / "setup-rocm-wsl.sh"
+
 #: Upstream material: the compressed model and its provenance (see ``vendor/UPSTREAM.md``).
 VENDOR_DIR = PACKAGE_DIR / "vendor"
 

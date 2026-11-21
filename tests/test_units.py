@@ -519,8 +519,10 @@ class TestWslRunner:
         command = runner.command(["job.json"], cwd=Path(r"D:\work\job1"))
         assert command[:5] == ["wsl.exe", "-d", "Ubuntu-24.04", "--cd", "/mnt/d/work/job1"]
         assert "INKSIGHT_MODEL_DIR=/opt/model" in command
-        assert any(c.startswith("PYTHONPATH=/mnt/") and c.endswith("/src") for c in command)
-        assert command[-4:] == ["/opt/py/bin/python", "-m", "inksight.worker", "job.json"]
+        assert not any(c.startswith("PYTHONPATH=") for c in command)   # no site-packages leak
+        assert command[-5] == "/opt/py/bin/python" and command[-4] == "-c"
+        assert command[-2].startswith("/mnt/") and command[-2].endswith("/inksight")
+        assert command[-1] == "job.json"
 
     def test_distro_choice_skips_docker_desktop(self, monkeypatch):
         import subprocess

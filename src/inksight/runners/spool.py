@@ -64,5 +64,12 @@ def submit_job(spool: Path, workdir: Path, *, timeout: Optional[float],
         code = int((job_dir / "exitcode").read_text().strip() or 1)
         log = (job_dir / "log.txt").read_text(encoding="utf-8", errors="replace")
     finally:
+        # Withdraw the job before deleting it: rmtree removes files in no set
+        # order, and a directory left with .ready but without .done would be
+        # picked up and run again by the server.
+        try:
+            (job_dir / ".ready").unlink()
+        except OSError:
+            pass
         shutil.rmtree(job_dir, ignore_errors=True)
     return code, log

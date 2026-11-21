@@ -176,7 +176,7 @@ distro through `wsl.exe`; the package source is used from the Windows side.
 
 ```powershell
 wsl --install -d Ubuntu-24.04 --no-launch
-wsl -d Ubuntu-24.04 -u root -- bash scripts/setup-rocm-wsl.sh     # ROCm 7.2 + tensorflow-rocm; several GB
+python -m inksight build --rocm      # ROCm 7.2 + tensorflow-rocm into WSL Ubuntu-24.04; several GB
 $env:INKSIGHT_WSL_DISTRO = "Ubuntu-24.04"                         # if it is not your default distro
 python -m inksight vectorize page.png --runner rocm
 ```

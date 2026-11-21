@@ -3,7 +3,8 @@
 # runner="rocm".  Run inside an Ubuntu 24.04 WSL distro, as root:
 #
 #   wsl --install -d Ubuntu-24.04 --no-launch
-#   wsl -d Ubuntu-24.04 -u root -- bash scripts/setup-rocm-wsl.sh
+#   python -m inksight build --rocm            (from Windows; runs this script)
+#   wsl -d Ubuntu-24.04 -u root -- bash src/inksight/scripts/setup-rocm-wsl.sh
 #
 # Needs a Radeon RX 7900 / 9000 series (or matching Radeon PRO) card and AMD
 # Software: Adrenalin Edition with WSL support on Windows (AMD lists 26.1.1+
