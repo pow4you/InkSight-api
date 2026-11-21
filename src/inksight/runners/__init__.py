@@ -22,7 +22,9 @@ def get_runner(spec: Union[str, Runner, None], tool: str) -> Runner:
 
     Args:
         spec: A :class:`Runner` (returned unchanged), ``"local"``, ``"docker"``,
-            ``"docker-gpu"`` (Docker with ``--gpus all``), or ``"auto"``/None.  Auto honours ``$INKSIGHT_RUNNER`` if set, then
+            ``"docker-gpu"`` (Docker with ``--gpus all``), ``"docker-server"`` /
+            ``"docker-gpu-server"`` (the same, with one persistent container that
+            keeps the model loaded), or ``"auto"``/None.  Auto honours ``$INKSIGHT_RUNNER`` if set, then
             prefers TensorFlow in this environment and falls back to Docker.
         tool: Program the runner must be able to execute.
 
@@ -39,11 +41,12 @@ def get_runner(spec: Union[str, Runner, None], tool: str) -> Runner:
         return LocalRunner()
     if name == "docker":
         return DockerRunner()
-    if name == "docker-gpu":
-        return DockerRunner(gpus="all")
+    if name in ("docker-gpu", "docker-server", "docker-gpu-server"):
+        return DockerRunner(gpus="all" if "gpu" in name else None,
+                            persistent=True if "server" in name else None)
     if name != "auto":
         raise ValueError(f"unknown runner {spec!r}; expected 'auto', 'local', 'docker', "
-                         "'docker-gpu' or a Runner")
+                         "'docker-gpu', 'docker-server', 'docker-gpu-server' or a Runner")
 
     local = LocalRunner()
     if local.is_available(tool):

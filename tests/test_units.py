@@ -376,3 +376,84 @@ def test_gpu_docker_runner_uses_a_cuda_image_and_passes_the_gpus(monkeypatch, tm
 
     monkeypatch.setenv("INKSIGHT_DOCKER_GPUS", "device=0")
     assert inksight.DockerRunner().gpus == "device=0"
+
+
+class TestPersistentServer:
+    """The serve protocol, with the server in a thread instead of a container."""
+
+    def _serve_in_thread(self, monkeypatch, spool, answers):
+        import threading
+        session = FakeSession(answers)
+        monkeypatch.setattr(worker.ModelSession, "get", classmethod(lambda cls, *a, **k: session))
+        monkeypatch.setattr(worker, "resolve_model_dir", lambda model_dir=None: Path("m"))
+        thread = threading.Thread(target=worker.serve, args=(spool,), kwargs={"poll": 0.01},
+                                  daemon=True)
+        thread.start()
+        return session, thread
+
+    def test_runner_sends_every_call_to_one_server(self, tmp_path, monkeypatch):
+        spool = tmp_path / "spool"
+        session, thread = self._serve_in_thread(monkeypatch, spool, {
+            "Recognize and derender.": "<ink_token_450> <ink_token_1> <ink_token_226>"})
+        runner = inksight.DockerRunner(persistent=True)
+        starts = []
+
+        def fake_start():
+            starts.append(1)
+            runner._spool, runner._server = spool, "fake-server"
+            return "fake-server"
+
+        monkeypatch.setattr(runner, "start_server", fake_start)
+        monkeypatch.setattr(runner, "_server_running", lambda: True)
+        word = inksight.InkSightWord(runner=runner)
+        first = word.vectorize(np.full((20, 40), 255, np.uint8))
+        second = word.vectorize(np.full((20, 40), 255, np.uint8))
+        assert len(first) == len(second) == 1 and len(starts) == 2       # start_server per call ...
+        assert len(session.calls) == 2                                   # ... one model session
+        assert "derendered 1 word" in word.last_run.output
+        assert [p.name for p in spool.iterdir() if p.is_dir()] == []     # job dirs cleaned up
+
+        (spool / worker.STOP).touch()
+        thread.join(5)
+        assert not thread.is_alive()
+
+    def test_a_bad_job_does_not_stop_the_server(self, tmp_path, monkeypatch):
+        import time
+        spool = tmp_path / "spool"
+        _, thread = self._serve_in_thread(monkeypatch, spool, {})
+        bad = spool / "bad"
+        bad.mkdir(parents=True)
+        (bad / "job.json").write_text(json.dumps({"images": ["a.png"], "prompts": []}))
+        (bad / worker.READY).touch()
+        for _ in range(500):
+            if (bad / worker.DONE).exists():
+                break
+            time.sleep(0.01)
+        assert (bad / "exitcode").read_text() == "1" and thread.is_alive()
+        (spool / worker.STOP).touch()
+        thread.join(5)
+
+    def test_server_runner_names(self, monkeypatch):
+        monkeypatch.delenv("INKSIGHT_DOCKER_PERSISTENT", raising=False)
+        assert inksight.get_runner("docker-server", "inksight-model").persistent
+        both = inksight.get_runner("docker-gpu-server", "inksight-model")
+        assert both.persistent and both.gpus == "all"
+        assert not inksight.DockerRunner().persistent
+        monkeypatch.setenv("INKSIGHT_DOCKER_PERSISTENT", "1")
+        assert inksight.DockerRunner().persistent
+
+
+def test_vectorize_many_sends_all_pages_in_one_call(tmp_path):
+    runner = FakeRunner()
+    page = inksight.InkSightPage(runner=runner, word_detector="whole")
+    drawings = page.vectorize_many(
+        [np.full((50, 200), 255, np.uint8), np.full((30, 30), 255, np.uint8), np.zeros((9, 9))],
+        [{"words": np.array([[0, 0, 100, 50], [100, 0, 200, 50]])}, {}, {"words": np.zeros((0, 4))}])
+    assert len(runner.calls) == 1                                    # one model invocation
+    assert len(runner.calls[0][3]["images"]) == 3                    # 2 + 1 + 0 words
+    assert [len(d) for d in drawings] == [2, 1, 0]
+    assert [(d.width, d.height) for d in drawings] == [(200, 50), (30, 30), (9, 9)]
+    assert drawings[0][1][0, 0] > 100 and drawings[1][0][0, 0] < 30  # strokes land in their own page
+    assert drawings[0].metadata["batched_images"] == 3
+    with pytest.raises(ValueError, match="input dicts"):
+        page.vectorize_many([np.zeros((4, 4))], [{}, {}])

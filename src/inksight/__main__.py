@@ -20,6 +20,7 @@ from typing import List, Optional
 from . import __version__, available_methods, get_vectorizer_class
 from .build import build_docker_image, bundle_model, prepare_local
 from .bundle import bundle_info
+from .drawing import VectorDrawing
 from .errors import InksightError, VectorizationError
 from .prompts import InferenceMode
 from .runners import DockerRunner, LocalRunner
@@ -62,8 +63,24 @@ def _cmd_vectorize(args: argparse.Namespace) -> int:
             print("note: --words is only used by the page method", file=sys.stderr)
 
     vectorizer = args.method_class(**options)
-    drawing = vectorizer.vectorize(args.image, **inputs)
-    output = Path(args.output) if args.output else Path(args.image).with_suffix(".svg")
+    if len(args.image) == 1:
+        drawing = vectorizer.vectorize(args.image[0], **inputs)
+        _write(drawing, Path(args.output) if args.output else Path(args.image[0]).with_suffix(".svg"))
+        return 0
+    # Several images: one model call for all of them (words batched across images).
+    if inputs.get("words"):
+        raise ValueError("--words applies to a single image")
+    out_dir = Path(args.output) if args.output else None
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    drawings = vectorizer.vectorize_many(args.image, [dict(inputs) for _ in args.image])
+    for image, drawing in zip(args.image, drawings):
+        default = Path(image).with_suffix(".svg")
+        _write(drawing, out_dir / default.name if out_dir else default)
+    return 0
+
+
+def _write(drawing: "VectorDrawing", output: Path) -> None:
     if output.suffix.lower() == ".json":
         output.write_text(json.dumps({"width": drawing.width, "height": drawing.height,
                                       "text": drawing.text,
@@ -78,7 +95,6 @@ def _cmd_vectorize(args: argparse.Namespace) -> int:
     if drawing.text:
         summary += f"\ntext: {drawing.text}"
     print(summary)
-    return 0
 
 
 def _cmd_words(args: argparse.Namespace) -> int:
@@ -144,11 +160,13 @@ def _build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     vec = commands.add_parser("vectorize", help="convert an image into strokes (SVG or JSON)")
-    vec.add_argument("image", help="input image (PNG, JPEG, ...)")
+    vec.add_argument("image", nargs="+", help="input image(s) (PNG, JPEG, ...); several are "
+                                                 "derendered in one model call")
     vec.add_argument("-m", "--method", dest="method_class", type=_method,
                      default=get_vectorizer_class("page"),
                      help=f"one of: {', '.join(available_methods())} (default: page)")
-    vec.add_argument("-o", "--output", help="output .svg or .json (default: image name with .svg)")
+    vec.add_argument("-o", "--output", help="output .svg or .json (default: image name with .svg); "
+                                            "with several images, an output directory")
     vec.add_argument("--mode", default="r+d", choices=[m.alias for m in InferenceMode],
                      help="r+d: the model reads the word itself (default); vanilla: no text "
                           "involved; d+t: derender the given / detected text")
@@ -161,7 +179,8 @@ def _build_parser() -> argparse.ArgumentParser:
                           "(default: doctr)")
     vec.add_argument("--batch-size", type=int, default=32, help="words per forward pass (default: 32)")
     vec.add_argument("--invert", action="store_true", help="writing is light on dark")
-    vec.add_argument("--runner", choices=["auto", "local", "docker", "docker-gpu"], default="auto",
+    vec.add_argument("--runner", choices=["auto", "local", "docker", "docker-gpu", "docker-server",
+                                                "docker-gpu-server"], default="auto",
                      help="where the model runs (default: auto)")
     vec.add_argument("--timeout", type=float, help="abort the model after this many seconds (docker)")
     vec.add_argument("--workdir", help="keep intermediate files and the model log here")

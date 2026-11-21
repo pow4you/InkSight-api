@@ -9,7 +9,7 @@ from abc import abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Iterator, List, Optional, Union
+from typing import Any, ClassVar, Dict, Iterable, Iterator, List, Optional, Sequence, Union
 
 import numpy as np
 
@@ -17,7 +17,7 @@ from . import worker
 from .base import Vectorizer
 from .drawing import VectorDrawing
 from .errors import VectorizationError
-from .images import CropTransform, prepare_word, save_png
+from .images import CropTransform, ImageLike, load_rgb, prepare_word, save_png
 from .prompts import InferenceMode
 from .runners import Runner, RunResult, get_runner
 from .tokens import decode
@@ -129,22 +129,63 @@ class ModelVectorizer(Vectorizer):
                          for t in words.texts]
 
     # --------------------------------------------------------------- pipeline
+    def vectorize_many(self, images: Iterable[ImageLike],
+                       inputs: Optional[Sequence[Dict[str, Any]]] = None) -> List[VectorDrawing]:
+        """Vectorize several images with **one** model invocation.
+
+        The words of all images go into a single job, so the batches of
+        ``batch_size`` are filled across images (a page of 7 words and one of
+        30 cost two forward passes, not three), and the runner's start-up -
+        a container plus the model's loading for the Docker runner - is paid
+        once for all of them.
+
+        Args:
+            images: Paths, NumPy arrays or PIL images.
+            inputs: Optional per-image keyword arguments of :meth:`vectorize`
+                (e.g. ``[{"words": "a.words.json"}, {"words": None}]``).
+
+        Returns:
+            One :class:`~inksight.drawing.VectorDrawing` per image, in order;
+            ``metadata["elapsed"]`` is the shared run time.
+        """
+        images = list(images)
+        per_image = list(inputs) if inputs is not None else [{} for _ in images]
+        if len(per_image) != len(images):
+            raise ValueError(f"got {len(images)} images but {len(per_image)} input dicts")
+        rgbs = [self.preprocess(load_rgb(image)) for image in images]
+        jobs = [self._stage(rgb, **extra) for rgb, extra in zip(rgbs, per_image)]
+        drawings = self._run_jobs(rgbs, jobs)
+        for drawing in drawings:
+            drawing.method = drawing.method or self.name
+        return [self.postprocess(drawing) for drawing in drawings]
+
     def _vectorize(self, rgb: np.ndarray, **inputs: Any) -> VectorDrawing:
-        height, width = rgb.shape[:2]
-        job = self._stage(rgb, **inputs)
-        words = job.words
-        if len(words) == 0:
-            return VectorDrawing([], width, height, method=self.name,
-                                 metadata={"words": [], "text": "", **job.metadata})
-        prompts, fallback_prompts = self.prompts(words)
+        return self._run_jobs([rgb], [self._stage(rgb, **inputs)])[0]
+
+    def _run_jobs(self, rgbs: Sequence[np.ndarray], jobs: Sequence[ModelJob]) -> List[VectorDrawing]:
+        """Derender the words of every ``(image, job)`` pair in one runner call."""
+        total = sum(len(job.words) for job in jobs)
+        if total == 0:
+            return [VectorDrawing([], rgb.shape[1], rgb.shape[0], method=self.name,
+                                  metadata={"words": [], "text": "", **job.metadata})
+                    for rgb, job in zip(rgbs, jobs)]
+
+        prompts: List[str] = []
+        fallback_prompts: Optional[List[str]] = []
+        for job in jobs:
+            first, fallback = self.prompts(job.words)
+            prompts += first
+            fallback_prompts = None if fallback is None else (fallback_prompts or []) + fallback
 
         with self._scratch_dir() as workdir:
-            transforms: List[CropTransform] = []
+            transforms: List[List[CropTransform]] = []
             names: List[str] = []
-            for index, box in enumerate(words.boxes):
-                pixels, transform = prepare_word(rgb, box, self.MODEL_SIZE)
-                names.append(save_png(pixels, workdir / self.IMAGE_PATTERN.format(index)).name)
-                transforms.append(transform)
+            for rgb, job in zip(rgbs, jobs):
+                transforms.append([])
+                for box in job.words.boxes:
+                    pixels, transform = prepare_word(rgb, box, self.MODEL_SIZE)
+                    names.append(save_png(pixels, workdir / self.IMAGE_PATTERN.format(len(names))).name)
+                    transforms[-1].append(transform)
             (workdir / self.JOB_NAME).write_text(json.dumps({
                 "images": names, "prompts": prompts, "fallback_prompts": fallback_prompts,
                 "batch_size": self.batch_size}, indent=1), encoding="utf-8")
@@ -159,10 +200,21 @@ class ModelVectorizer(Vectorizer):
                 raise VectorizationError(self._failure_message(result), result.output)
             answer = json.loads(output.read_text(encoding="utf-8"))
 
-        drawing = self._assemble(answer, words, transforms, width, height)
-        drawing.metadata.update(elapsed=result.elapsed, runner=self.runner.name,
-                                tokenizer=answer.get("tokenizer"), **job.metadata)
-        return drawing
+        outputs = answer["outputs"]
+        if len(outputs) != total:
+            raise VectorizationError(f"the model answered {len(outputs)} of {total} words")
+        drawings, start = [], 0
+        for rgb, job, crops in zip(rgbs, jobs, transforms):
+            stop = start + len(job.words)
+            drawing = self._assemble({"outputs": outputs[start:stop]}, job.words, crops,
+                                     rgb.shape[1], rgb.shape[0])
+            drawing.metadata.update(elapsed=result.elapsed, runner=self.runner.name,
+                                    tokenizer=answer.get("tokenizer"), **job.metadata)
+            if len(jobs) > 1:
+                drawing.metadata["batched_images"] = len(jobs)
+            drawings.append(drawing)
+            start = stop
+        return drawings
 
     def _assemble(self, answer: Dict[str, Any], words: Words, transforms: List[CropTransform],
                   width: int, height: int) -> VectorDrawing:

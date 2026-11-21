@@ -76,6 +76,29 @@ python -m inksight info             # shows the methods, the model and which run
   tensorflow-text, the model unpacked; a few minutes, once) and every call
   after that runs in a throw-away, network-less container. Nothing to install
   but Docker; each call also pays the model loading.
+* **One long-lived container** (`runner="docker-server"`, or
+  `DockerRunner(persistent=True)`, or `INKSIGHT_DOCKER_PERSISTENT=1`). The
+  first call starts a single container running `inksight-model --serve`, which
+  loads the model once and then picks up every later call's job from a
+  mounted spool directory; calls no longer pay a container start and the
+  model loading. The container stops at interpreter exit, on
+  `runner.close()` / leaving `with runner:`, or after 15 idle minutes
+  (`idle_timeout=`). Combine it with the GPU: `runner="docker-gpu-server"`.
+
+### Many pages in one call
+
+`vectorize_many()` puts the words of several images into **one** model job:
+the runner starts once, and the batches of `batch_size` words are filled across
+pages instead of each page ending in a half-empty batch.
+
+```python
+page = InkSightPage(runner="docker-gpu-server")
+drawings = page.vectorize_many(["p1.png", "p2.png", "p3.png"])
+drawings = page.vectorize_many(paths, [{"words": "p1.words.json"}, {}, {}])   # per-image inputs
+```
+
+On the command line, several images do the same:
+`python -m inksight vectorize p1.png p2.png p3.png -o out/`.
 
 **Speed.** The model writes its answer one ink token at a time, and a word
 takes a few hundred tokens. On a desktop CPU (measured: Ryzen 7 5800X) that is

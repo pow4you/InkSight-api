@@ -23,6 +23,14 @@ derender* to *vanilla*), all in one more batch.  ``output.json``::
 :class:`~inksight.runners.LocalRunner` calls :func:`main` in-process and keeps
 the loaded model between calls; :class:`~inksight.runners.DockerRunner` runs
 the same function as the container's ``inksight-model`` command.
+
+``inksight-model --serve SPOOL`` keeps the model loaded and executes jobs as
+they appear: one sub-directory of ``SPOOL`` per job, picked up once it holds a
+``.ready`` marker; the program then writes ``output.json``, ``log.txt``,
+``exitcode`` and finally a ``.done`` marker.  A ``.stop`` file in ``SPOOL``
+(or ``--idle-timeout`` seconds without work) ends the program.  The persistent
+Docker runner uses this so that a container - and the model's loading and XLA
+compilation - is started once, not once per call.
 """
 
 from __future__ import annotations
@@ -208,9 +216,76 @@ def run_job(job_path: Path, *, model_dir: Optional[str] = None, tokenizer: str =
     return output
 
 
+#: Marker files of the serve protocol.
+READY, DONE, STOP = ".ready", ".done", ".stop"
+
+
+def serve(spool: Path, *, model_dir: Optional[str] = None, tokenizer: str = "auto",
+          poll: float = 0.05, idle_timeout: Optional[float] = None) -> int:
+    """Execute every job that appears in ``spool`` until told to stop (see module docs)."""
+    spool = Path(spool)
+    spool.mkdir(parents=True, exist_ok=True)
+    session = ModelSession.get(resolve_model_dir(model_dir), tokenizer)   # load once, up front
+    logger.info("serving jobs from %s (model loaded in %.1f s)", spool, session.load_seconds)
+    (spool / ".serving").write_text(str(os.getpid()), encoding="utf-8")
+    last_work = time.monotonic()
+    while not (spool / STOP).exists():
+        pending = _pending_jobs(spool)
+        if not pending:
+            if idle_timeout is not None and time.monotonic() - last_work > idle_timeout:
+                logger.info("no work for %.0f s; stopping", idle_timeout)
+                break
+            time.sleep(poll)
+            continue
+        for job_dir in pending:
+            _serve_one(job_dir, model_dir=model_dir, tokenizer=tokenizer)
+        last_work = time.monotonic()
+    return 0
+
+
+def _pending_jobs(spool: Path) -> List[Path]:
+    """Job directories that are ready and not done, oldest first.
+
+    Clients delete finished job directories at any time, so anything may
+    vanish between listing and looking; such entries are skipped.
+    """
+    found: List[Tuple[float, Path]] = []
+    for job_dir in spool.iterdir():
+        try:
+            if not (job_dir / DONE).exists():
+                found.append(((job_dir / READY).stat().st_mtime, job_dir))
+        except OSError:                       # not ready yet, not a directory, or just removed
+            continue
+    return [job_dir for _, job_dir in sorted(found)]
+
+
+def _serve_one(job_dir: Path, **options: Any) -> None:
+    buffer: List[str] = []
+    handler = logging.Handler()
+    handler.emit = lambda record: buffer.append(record.getMessage())   # type: ignore[assignment]
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        run_job(job_dir / "job.json", **options)
+        code = 0
+    except Exception as exc:                  # a bad job must not take the server down
+        logger.error("%s: %s", TOOL, exc)
+        code = 1
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+    (job_dir / "log.txt").write_text("\n".join(buffer) + "\n", encoding="utf-8")
+    (job_dir / "exitcode").write_text(str(code), encoding="utf-8")
+    (job_dir / DONE).write_text("", encoding="utf-8")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=TOOL, description="Run the InkSight model on a job file.")
     parser.add_argument("job", nargs="?", default="job.json")
+    parser.add_argument("--serve", metavar="SPOOL", help="keep the model loaded and run every "
+                                                         "job that appears in this directory")
+    parser.add_argument("--idle-timeout", type=float, help="--serve: stop after this many idle seconds")
     parser.add_argument("--model-dir", help="SavedModel folder (default: $INKSIGHT_MODEL_DIR "
                                             "or the bundled model)")
     parser.add_argument("--tokenizer", choices=TOKENIZERS, default="auto")
@@ -220,6 +295,13 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None, *, workdir: Optional[Path] = None) -> int:
     """Run the program; ``workdir`` replaces the current directory (in-process use)."""
     args = _parser().parse_args(argv)
+    if args.serve:
+        try:
+            return serve(Path(args.serve), model_dir=args.model_dir, tokenizer=args.tokenizer,
+                         idle_timeout=args.idle_timeout)
+        except (InksightError, OSError) as exc:
+            logger.error("%s: %s", TOOL, exc)
+            return 1
     job = Path(args.job)
     if workdir is not None and not job.is_absolute():
         job = Path(workdir) / job
