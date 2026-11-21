@@ -109,6 +109,18 @@ weights are bfloat16, which CPUs without native bfloat16 support compute
 slowly. A GPU (Linux: `pip install "tensorflow[and-cuda]==2.20.0"`) is the way
 to make it fast; the authors' notebook targets one too.
 
+Measured on Windows 11 + Docker Desktop (WSL 2), Ryzen 16 threads, GTX 1080 Ti,
+the 5-word example page, word boxes given:
+
+| Runner | First call | Each later call |
+|--------|-----------:|----------------:|
+| `docker-server` (CPU) | 779 s (incl. a 3 min image build) | 499 s |
+| `docker-gpu` (container per call) | 34 s | 33 s |
+| `docker-gpu-server` | 32 s | **14.5 s** |
+
+That makes the warm GPU server about 34× faster than the CPU per page. Page plus
+an extra word image in one `vectorize_many` call took the same 14.5 s.
+
 How the words are scheduled (`ModelSession.generate`):
 
 * The graph's decode loop stops when *every* answer in a batch has ended, so
