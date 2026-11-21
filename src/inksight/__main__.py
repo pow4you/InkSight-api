@@ -23,7 +23,7 @@ from .bundle import bundle_info
 from .drawing import VectorDrawing
 from .errors import InksightError, VectorizationError
 from .prompts import InferenceMode
-from .runners import DockerRunner, LocalRunner
+from .runners import DockerRunner, LocalRunner, WslRunner
 from .words import available_detectors, get_detector
 from .worker import TOOL
 
@@ -142,6 +142,12 @@ def _cmd_info(args: argparse.Namespace) -> int:
     else:
         state = "built" if docker.image_exists() else "not built yet (built on first use)"
         print(f"  image {docker.image}: {state}")
+    if sys.platform == "win32":
+        wsl = WslRunner()
+        print("wsl / rocm runner:")
+        print(f"  ready: {wsl.describe()}" if wsl.is_available()
+              else f"  not available ({wsl.python} with TensorFlow not found in any WSL distro; "
+                   "see scripts/setup-rocm-wsl.sh)")
     return 0
 
 

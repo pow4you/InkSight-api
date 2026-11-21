@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -116,11 +116,19 @@ class PaddleOCRWordDetector(WordDetector):
                 scores.append(score)
 
         if self.level == "word":
-            for words, regions, score in zip(result["text_word"], result["text_word_region"],
-                                             result["rec_scores"]):
-                for word, region in zip(words, regions):
-                    if word.strip():
-                        add(region, word.strip(), float(score))
+            for words, regions, line_polygon, line_text, score in zip(
+                    result["text_word"], result["text_word_region"], result["rec_polys"],
+                    result["rec_texts"], result["rec_scores"]):
+                kept = [(w.strip(), r) for w, r in zip(words, regions) if w.strip()]
+                placed = fit_words_to_line(kept, line_polygon)
+                if placed is None:
+                    # PaddleOCR's word positions are derived from the recogniser and can
+                    # land outside their own line; the line box itself is reliable.
+                    if line_text.strip():
+                        add(line_polygon, line_text.strip(), float(score))
+                    continue
+                for word, box in placed:
+                    add(box, word, float(score))
         else:
             for polygon, text, score in zip(result["rec_polys"], result["rec_texts"],
                                             result["rec_scores"]):
@@ -131,3 +139,26 @@ class PaddleOCRWordDetector(WordDetector):
 
     def __repr__(self) -> str:
         return f"PaddleOCRWordDetector(level={self.level!r}, box_expansion={self.box_expansion})"
+
+
+def fit_words_to_line(words: Sequence[Tuple[str, Any]], line_polygon: Any,
+                      min_overlap: float = 0.5) -> Optional[List[Tuple[str, List[float]]]]:
+    """Clip PaddleOCR word regions to their text line, or None if they do not fit it.
+
+    Each word region is cut to the line's bounding box.  If any word lies
+    mostly outside the line (less than ``min_overlap`` of its width inside),
+    the word positions of that line are not trustworthy and None is returned,
+    so that the caller uses the whole line instead.
+    """
+    line = np.asarray(line_polygon, dtype=np.float64).reshape(-1, 2)
+    lx0, ly0, lx1, ly1 = line[:, 0].min(), line[:, 1].min(), line[:, 0].max(), line[:, 1].max()
+    placed: List[Tuple[str, List[float]]] = []
+    for word, region in words:
+        points = np.asarray(region, dtype=np.float64).reshape(-1, 2)
+        x0, x1 = points[:, 0].min(), points[:, 0].max()
+        inside = min(x1, lx1) - max(x0, lx0)
+        if x1 <= x0 or inside < min_overlap * (x1 - x0):
+            return None
+        placed.append((word, [max(x0, lx0), max(points[:, 1].min(), ly0),
+                              min(x1, lx1), min(points[:, 1].max(), ly1)]))
+    return placed or None

@@ -275,7 +275,8 @@ def run_job(job_path: Path, *, model_dir: Optional[str] = None, tokenizer: str =
             for i, text in zip(retry, again):
                 outputs[i] = {"raw": text, "prompt": fallback[i], "fallback": True}
     run_seconds = time.perf_counter() - started
-    logger.info("derendered %d word(s) in %.1f s", len(names), run_seconds)
+    logger.info("derendered %d word(s) in %.1f s on %s", len(names), run_seconds,
+                ", ".join(getattr(session, "devices", None) or ["?"]))
 
     result = {"outputs": outputs, "model": str(session.model_dir), "tokenizer": session.tokenizer,
               "devices": getattr(session, "devices", None),

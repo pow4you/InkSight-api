@@ -49,7 +49,10 @@ class WslRunner(Runner):
 
     Args:
         distro: WSL distribution (``wsl -d``).  Default: ``$INKSIGHT_WSL_DISTRO``,
-            else WSL's default distribution.
+            else the first distro whose ``python`` can import TensorFlow - WSL's
+            default distribution first, then the others.  Docker Desktop's own
+            ``docker-desktop`` distros are never chosen (installing Docker Desktop
+            often makes one of them the default).
         python: Interpreter inside the distro.  Default: ``$INKSIGHT_WSL_PYTHON``,
             else ``/opt/inksight-rocm/bin/python`` (what the setup script creates).
         user: Linux user to run as (``wsl -u``); default: the distro's default user.
@@ -105,27 +108,66 @@ class WslRunner(Runner):
         return command
 
     # ----------------------------------------------------------- availability
-    def is_available(self, tool: str) -> bool:
-        """WSL exists here and the distro's Python can import TensorFlow (probed once)."""
+    def is_available(self, tool: str = "inksight-model") -> bool:
+        """WSL exists here and a distro's Python can import TensorFlow (probed once).
+
+        Without an explicit distro this also settles which distro is used.
+        """
         if tool != "inksight-model" or sys.platform != "win32" or shutil.which(self.wsl) is None:
             return False
         if self._available is None:
-            probe = [self.wsl, *(["-d", self.distro] if self.distro else []),
-                     *(["-u", self.user] if self.user else []), "--", self.python, "-c",
-                     "import importlib.util as u, sys; sys.exit(u.find_spec('tensorflow') is None)"]
-            try:
-                self._available = subprocess.run(probe, stdout=subprocess.DEVNULL,
-                                                 stderr=subprocess.DEVNULL,
-                                                 timeout=_PROBE_TIMEOUT).returncode == 0
-            except (OSError, subprocess.TimeoutExpired):
-                self._available = False
+            if self.distro:
+                self._available = self._probe(self.distro)
+            else:
+                for candidate in self._candidate_distros():
+                    if self._probe(candidate):
+                        self.distro, self._available = candidate, True
+                        break
+                else:
+                    self._available = False
         return self._available
+
+    def ensure_available(self) -> None:
+        """Raise a clear error up front instead of a failure deep inside a run."""
+        if not self.is_available():
+            where = f"WSL distro {self.distro!r}" if self.distro else "any WSL distro"
+            raise BackendNotAvailableError(
+                f"{self.python} with TensorFlow was not found in {where}. Run "
+                "scripts/setup-rocm-wsl.sh inside the distro, or set INKSIGHT_WSL_DISTRO / "
+                "INKSIGHT_WSL_PYTHON (distros: "
+                f"{', '.join(self.list_distros()) or 'none'}).")
+
+    def list_distros(self) -> List[str]:
+        """Installed WSL distributions, WSL's default first."""
+        try:
+            listed = subprocess.run([self.wsl, "--list", "--quiet"], stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, timeout=_PROBE_TIMEOUT).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        # wsl.exe writes UTF-16 to pipes unless WSL_UTF8=1 is set.
+        text = listed.decode("utf-16-le", errors="ignore") if b"\0" in listed else \
+            listed.decode("utf-8", errors="ignore")
+        return [line.strip() for line in text.replace("\0", "").splitlines() if line.strip()]
+
+    def _candidate_distros(self) -> List[str]:
+        return [name for name in self.list_distros() if not name.lower().startswith("docker-desktop")]
+
+    def _probe(self, distro: str) -> bool:
+        probe = [self.wsl, "-d", distro, *(["-u", self.user] if self.user else []), "--",
+                 self.python, "-c",
+                 "import importlib.util as u, sys; sys.exit(u.find_spec('tensorflow') is None)"]
+        try:
+            return subprocess.run(probe, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=_PROBE_TIMEOUT).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
 
     # -------------------------------------------------------------------- run
     def run(self, tool: str, args: Sequence[str], workdir: Path,
             timeout: Optional[float] = None) -> RunResult:
         if tool != "inksight-model":
             raise BackendNotAvailableError(f"the WSL runner only runs 'inksight-model', not '{tool}'")
+        self.ensure_available()
         if self.persistent:
             return self._run_on_server(tool, args, Path(workdir), timeout)
         command = self.command([*map(str, args)], cwd=Path(workdir))

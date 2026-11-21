@@ -314,6 +314,7 @@ class FakeSession:
     def __init__(self, answers):
         self.answers, self.calls = answers, []
         self.model_dir, self.tokenizer, self.load_seconds = Path("m"), "fake", 0.0
+        self.devices = ["/device:GPU:0"]
 
     def generate(self, images, prompts, batch_size=32):
         self.calls.append(list(prompts))
@@ -410,7 +411,8 @@ class TestPersistentServer:
         second = word.vectorize(np.full((20, 40), 255, np.uint8))
         assert len(first) == len(second) == 1 and len(starts) == 2       # start_server per call ...
         assert len(session.calls) == 2                                   # ... one model session
-        assert "derendered 1 word" in word.last_run.output
+        assert "derendered 1 word(s)" in word.last_run.output
+        assert "on /device:GPU:0" in word.last_run.output             # devices reach the log
         assert [p.name for p in spool.iterdir() if p.is_dir()] == []     # job dirs cleaned up
 
         (spool / worker.STOP).touch()
@@ -520,6 +522,31 @@ class TestWslRunner:
         assert any(c.startswith("PYTHONPATH=/mnt/") and c.endswith("/src") for c in command)
         assert command[-4:] == ["/opt/py/bin/python", "-m", "inksight.worker", "job.json"]
 
+    def test_distro_choice_skips_docker_desktop(self, monkeypatch):
+        import subprocess
+        from inksight.runners import wsl
+        monkeypatch.delenv("INKSIGHT_WSL_DISTRO", raising=False)
+        monkeypatch.setattr(wsl.sys, "platform", "win32")
+        monkeypatch.setattr(wsl.shutil, "which", lambda name: name)
+        probed = []
+
+        def fake_run(command, **kwargs):
+            if "--list" in command:          # wsl.exe answers in UTF-16
+                out = "docker-desktop\r\nDebian\r\nUbuntu-24.04\r\n".encode("utf-16-le")
+                return subprocess.CompletedProcess(command, 0, out)
+            probed.append(command[2])
+            return subprocess.CompletedProcess(command, 0 if command[2] == "Ubuntu-24.04" else 1)
+
+        monkeypatch.setattr(wsl.subprocess, "run", fake_run)
+        runner = inksight.WslRunner()
+        assert runner.is_available() and runner.distro == "Ubuntu-24.04"
+        assert probed == ["Debian", "Ubuntu-24.04"]                 # docker-desktop never probed
+
+        nothing = inksight.WslRunner(python="/missing/python")
+        monkeypatch.setattr(nothing, "_probe", lambda distro: False)
+        with pytest.raises(inksight.BackendNotAvailableError, match="Ubuntu-24.04"):
+            nothing.ensure_available()
+
     def test_runner_names(self, monkeypatch):
         monkeypatch.delenv("INKSIGHT_WSL_PERSISTENT", raising=False)
         assert not inksight.get_runner("wsl", "inksight-model").persistent
@@ -530,6 +557,7 @@ class TestWslRunner:
         session, thread = TestPersistentServer()._serve_in_thread(monkeypatch, spool, {
             "Recognize and derender.": "<ink_token_450> <ink_token_1> <ink_token_226>"})
         runner = inksight.WslRunner(persistent=True)
+        runner._available = True
         monkeypatch.setattr(runner, "start_server", lambda: setattr(runner, "_spool", spool))
         drawing = inksight.InkSightWord(runner=runner).vectorize(np.full((20, 40), 255, np.uint8))
         assert len(drawing) == 1 and len(session.calls) == 1
@@ -543,3 +571,15 @@ def test_rocm_tensorflow_keeps_xla_autotuning(monkeypatch):
     assert not any("autotune_level" in flag for flag in worker.XLA_FLAGS_ROCM)
     monkeypatch.setenv("INKSIGHT_ROCM", "0")
     assert not worker.tensorflow_is_rocm()
+
+
+def test_paddle_word_regions_are_checked_against_their_line():
+    from inksight.words.paddle_detector import fit_words_to_line
+    line = [[695, 120], [747, 120], [747, 160], [695, 160]]
+    # "Books" placed far right of its own line, as PaddleOCR did on a real page: use the line.
+    assert fit_words_to_line([("Books", [[815, 118], [868, 118], [868, 162], [815, 162]])], line) is None
+    # A slightly overhanging word is clipped to the line.
+    wide = [[100, 10], [400, 10], [400, 40], [100, 40]]
+    placed = fit_words_to_line([("a", [[90, 5], [200, 5], [200, 45], [90, 45]]),
+                                ("b", [[210, 12], [390, 12], [390, 38], [210, 38]])], wide)
+    assert placed == [("a", [100, 10, 200, 40]), ("b", [210, 12, 390, 38])]
