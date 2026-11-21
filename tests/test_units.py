@@ -457,3 +457,53 @@ def test_vectorize_many_sends_all_pages_in_one_call(tmp_path):
     assert drawings[0].metadata["batched_images"] == 3
     with pytest.raises(ValueError, match="input dicts"):
         page.vectorize_many([np.zeros((4, 4))], [{}, {}])
+
+
+class TestScheduling:
+    """Word ordering and batch padding in ModelSession.generate (no TensorFlow needed)."""
+
+    class _Signature:
+        def __init__(self):
+            self.batches = []
+
+        def __call__(self, **inputs):
+            texts = [t.decode() for t in inputs["input_text"].numpy()]
+            self.batches.append(texts)
+            answer = np.array([[f"out:{t}".encode()] for t in texts], dtype=object)
+            return {"output_0": type("Tensor", (), {"numpy": lambda self: answer})()}
+
+    def _session(self, on_accelerator):
+        tf = pytest.importorskip("tensorflow")
+        session = worker.ModelSession.__new__(worker.ModelSession)
+        session._tf, session._signature, session.on_accelerator = tf, self._Signature(), on_accelerator
+        return session
+
+    @staticmethod
+    def _word(ink):
+        image = np.zeros((224, 224, 3), np.uint8)
+        image[50:150, :] = 255                         # paper inside black padding
+        image[60:60 + ink, 10:20] = 0                  # ink, 10 px per row
+        return image
+
+    def test_padded_size(self):
+        assert [worker.padded_size(n, 32) for n in (1, 2, 3, 5, 17, 32)] == [1, 2, 4, 8, 32, 32]
+        assert worker.padded_size(20, 24) == 24
+
+    def test_ink_estimate_ignores_padding(self):
+        assert worker.ink_estimate(self._word(0)) == 0
+        assert worker.ink_estimate(self._word(7)) == 70
+
+    def test_sorting_groups_by_length_and_restores_order(self):
+        session = self._session(on_accelerator=False)
+        inks = [80, 1, 60, 2, 70]
+        out = session.generate([self._word(i) for i in inks], [f"p{i}" for i in inks], batch_size=2)
+        assert out == [f"out:p{i}" for i in inks]                    # original order
+        assert session._signature.batches == [["p1", "p2"], ["p60", "p70"], ["p80"]]
+
+    def test_padding_on_accelerators_only(self):
+        gpu = self._session(on_accelerator=True)
+        assert gpu.generate([self._word(1)] * 3, ["a", "b", "c"], batch_size=32) == ["out:a", "out:b", "out:c"]
+        assert gpu._signature.batches == [["a", "b", "c", "c"]]      # padded to 4
+        cpu = self._session(on_accelerator=False)
+        cpu.generate([self._word(1)] * 3, ["a", "b", "c"], batch_size=32)
+        assert cpu._signature.batches == [["a", "b", "c"]]

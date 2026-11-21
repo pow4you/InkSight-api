@@ -129,7 +129,9 @@ class ModelSession:
         except Exception as exc:
             raise BackendNotAvailableError(f"could not load the model at {model_dir}: {exc}") from exc
         self._tf, self._model = tf, model
-        self.devices = [d.name for d in tf.config.list_logical_devices() if d.device_type != "CPU"]             or ["CPU"]
+        accelerators = [d.name for d in tf.config.list_logical_devices() if d.device_type != "CPU"]
+        self.devices = accelerators or ["CPU"]
+        self.on_accelerator = bool(accelerators)
         self._signature = model.signatures["serving_default"]
         self.model_dir = model_dir
         self.load_seconds = time.perf_counter() - started
@@ -145,21 +147,66 @@ class ModelSession:
         return cls._cache[key]
 
     def generate(self, images: Sequence[np.ndarray], prompts: Sequence[str],
-                 batch_size: int = 32) -> List[str]:
-        """Raw decoder text for every ``(image, prompt)`` pair, as in the notebook."""
+                 batch_size: int = 32, *, sort: bool = True,
+                 pad: Optional[bool] = None) -> List[str]:
+        """Raw decoder text for every ``(image, prompt)`` pair, as in the notebook.
+
+        Two scheduling tweaks.  Rows of a batch are decoded independently, so
+        neither changes what a word's answer is (beyond float rounding that
+        can differ between batch shapes):
+
+        * ``sort``: the graph decodes a batch until its *longest* answer ends,
+          so when there are more pairs than one batch holds, they are grouped
+          by :func:`ink_estimate` (similar-length words share a batch).
+        * ``pad``: the decoder is XLA-compiled per batch shape, so every new
+          number of words costs a fresh compilation.  Padding each batch up
+          to a power of two (by repeating its last pair, whose duplicate ends
+          at the same step) caps that at log2(batch_size) shapes.  Default:
+          on with a GPU (padding is nearly free there), off on a CPU (where
+          the extra rows cost real time).
+        """
         tf = self._tf
-        outputs: List[str] = []
-        for start in range(0, len(images), batch_size):
-            chunk = images[start:start + batch_size]
-            encoded = tf.stack([tf.reshape(tf.io.encode_jpeg(np.ascontiguousarray(img[:, :, :3])), (1,))
-                                for img in chunk])                         # (B, 1)
+        count = len(images)
+        if sort and count > batch_size:
+            order = sorted(range(count), key=lambda i: ink_estimate(images[i]))
+        else:
+            order = list(range(count))
+        pad = self.on_accelerator if pad is None else pad
+        outputs: List[str] = [""] * count
+        for start in range(0, count, batch_size):
+            rows = order[start:start + batch_size]
+            real = len(rows)
+            if pad:
+                rows = rows + [rows[-1]] * (padded_size(real, batch_size) - real)
+            encoded = tf.stack([tf.reshape(tf.io.encode_jpeg(
+                np.ascontiguousarray(images[i][:, :, :3])), (1,)) for i in rows])   # (B, 1)
             result = self._signature(**{
-                "input_text": tf.constant(list(prompts[start:start + batch_size]), dtype=tf.string),
+                "input_text": tf.constant([prompts[i] for i in rows], dtype=tf.string),
                 "image/encoded": encoded,
             })
             decoded = result["output_0"].numpy()
-            outputs.extend(decoded[i][0].decode("utf-8") for i in range(decoded.shape[0]))
+            for k, i in enumerate(rows[:real]):
+                outputs[i] = decoded[k][0].decode("utf-8")
         return outputs
+
+
+def padded_size(count: int, batch_size: int) -> int:
+    """The next power of two >= ``count``, capped at ``batch_size``."""
+    return min(batch_size, 1 << max(0, count - 1).bit_length())
+
+
+def ink_estimate(image: np.ndarray) -> int:
+    """Rough size of a word's answer: the number of ink pixels in its model input.
+
+    Model inputs are the word on light paper, centred on pure black padding;
+    the paper's bounding box is found first so the padding is not counted.
+    """
+    gray = np.asarray(image)[:, :, :3].max(axis=2)
+    rows, cols = np.flatnonzero(gray.any(axis=1)), np.flatnonzero(gray.any(axis=0))
+    if rows.size == 0:
+        return 0
+    paper = gray[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+    return int((paper < 128).sum())
 
 
 def resolve_model_dir(model_dir: Optional[str] = None) -> Path:

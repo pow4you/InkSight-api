@@ -109,6 +109,19 @@ weights are bfloat16, which CPUs without native bfloat16 support compute
 slowly. A GPU (Linux: `pip install "tensorflow[and-cuda]==2.20.0"`) is the way
 to make it fast; the authors' notebook targets one too.
 
+How the words are scheduled (`ModelSession.generate`):
+
+* The graph's decode loop stops when *every* answer in a batch has ended, so
+  a batch costs as much as its longest word. With more words than one batch,
+  they are grouped by the amount of ink in their crop (a stand-in for answer
+  length) so that short words do not wait for long ones.
+* The decoder is XLA-compiled once per batch shape. On a GPU each batch is
+  padded to a power of two (1, 2, 4, ... `batch_size`) by repeating a word,
+  so a long-running process compiles at most six shapes instead of one per
+  distinct word count. On a CPU padding is off: extra rows cost real time there.
+* On a GPU, a larger `batch_size` (64-128, memory permitting) fits more words
+  into one pass at little extra cost per step.
+
 ### On a GPU, through Docker
 
 The checkpoint's graph is plain TensorFlow/XLA (no CPU-only compiled modules),
