@@ -64,13 +64,35 @@ XLA_FLAGS = (
     "--xla_disable_hlo_passes=custom-kernel-fusion-rewriter,custom_kernel-fusion-autotuner",
 )
 
+#: On AMD GPUs (ROCm) the notebook's ``--xla_gpu_autotune_level=0`` leaves
+#: MIOpen's convolutions without scratch memory, and the image encoder fails
+#: with "Not enough workspace".  With a ROCm build of TensorFlow, autotuning
+#: stays on and only the pass list is kept.
+XLA_FLAGS_ROCM = XLA_FLAGS[1:]
+
 TOKENIZERS = ("auto", "tensorflow-text", "sentencepiece")
 
 
 # --------------------------------------------------------------------------- TensorFlow
+def tensorflow_is_rocm() -> bool:
+    """Whether the installed TensorFlow is AMD's ROCm build (checked without importing it).
+
+    ``$INKSIGHT_ROCM`` (``1``/``0``) overrides the check.
+    """
+    forced = os.environ.get("INKSIGHT_ROCM")
+    if forced is not None:
+        return forced not in ("", "0", "false")
+    from importlib import metadata
+    try:
+        metadata.distribution("tensorflow-rocm")
+    except metadata.PackageNotFoundError:
+        return False
+    return True
+
+
 def configure_tensorflow() -> None:
     """Set the notebook's ``XLA_FLAGS`` (and quieter TF logs) before TF is imported."""
-    flags = " ".join(XLA_FLAGS)
+    flags = " ".join(XLA_FLAGS_ROCM if tensorflow_is_rocm() else XLA_FLAGS)
     current = os.environ.get("XLA_FLAGS", "")
     if flags not in current:
         if "tensorflow" in sys.modules:

@@ -507,3 +507,39 @@ class TestScheduling:
         cpu = self._session(on_accelerator=False)
         cpu.generate([self._word(1)] * 3, ["a", "b", "c"], batch_size=32)
         assert cpu._signature.batches == [["a", "b", "c"]]
+
+
+class TestWslRunner:
+    def test_paths_and_command(self, monkeypatch, tmp_path):
+        from inksight.runners.wsl import to_wsl_path
+        assert to_wsl_path(r"C:\Users\me\x y") == "/mnt/c/Users/me/x y"
+        runner = inksight.WslRunner("Ubuntu-24.04", "/opt/py/bin/python", model_dir="/opt/model")
+        command = runner.command(["job.json"], cwd=Path(r"D:\work\job1"))
+        assert command[:5] == ["wsl.exe", "-d", "Ubuntu-24.04", "--cd", "/mnt/d/work/job1"]
+        assert "INKSIGHT_MODEL_DIR=/opt/model" in command
+        assert any(c.startswith("PYTHONPATH=/mnt/") and c.endswith("/src") for c in command)
+        assert command[-4:] == ["/opt/py/bin/python", "-m", "inksight.worker", "job.json"]
+
+    def test_runner_names(self, monkeypatch):
+        monkeypatch.delenv("INKSIGHT_WSL_PERSISTENT", raising=False)
+        assert not inksight.get_runner("wsl", "inksight-model").persistent
+        assert inksight.get_runner("rocm", "inksight-model").persistent
+
+    def test_persistent_mode_uses_the_spool_protocol(self, tmp_path, monkeypatch):
+        spool = tmp_path / "spool"
+        session, thread = TestPersistentServer()._serve_in_thread(monkeypatch, spool, {
+            "Recognize and derender.": "<ink_token_450> <ink_token_1> <ink_token_226>"})
+        runner = inksight.WslRunner(persistent=True)
+        monkeypatch.setattr(runner, "start_server", lambda: setattr(runner, "_spool", spool))
+        drawing = inksight.InkSightWord(runner=runner).vectorize(np.full((20, 40), 255, np.uint8))
+        assert len(drawing) == 1 and len(session.calls) == 1
+        (spool / worker.STOP).touch()
+        thread.join(5)
+
+
+def test_rocm_tensorflow_keeps_xla_autotuning(monkeypatch):
+    monkeypatch.setenv("INKSIGHT_ROCM", "1")
+    assert worker.tensorflow_is_rocm()
+    assert not any("autotune_level" in flag for flag in worker.XLA_FLAGS_ROCM)
+    monkeypatch.setenv("INKSIGHT_ROCM", "0")
+    assert not worker.tensorflow_is_rocm()

@@ -13,8 +13,9 @@ from ..errors import BackendNotAvailableError
 from .base import Runner, RunResult
 from .docker import DockerRunner
 from .local import LocalRunner
+from .wsl import WslRunner
 
-__all__ = ["Runner", "RunResult", "LocalRunner", "DockerRunner", "get_runner"]
+__all__ = ["Runner", "RunResult", "LocalRunner", "DockerRunner", "WslRunner", "get_runner"]
 
 
 def get_runner(spec: Union[str, Runner, None], tool: str) -> Runner:
@@ -24,7 +25,9 @@ def get_runner(spec: Union[str, Runner, None], tool: str) -> Runner:
         spec: A :class:`Runner` (returned unchanged), ``"local"``, ``"docker"``,
             ``"docker-gpu"`` (Docker with ``--gpus all``), ``"docker-server"`` /
             ``"docker-gpu-server"`` (the same, with one persistent container that
-            keeps the model loaded), or ``"auto"``/None.  Auto honours ``$INKSIGHT_RUNNER`` if set, then
+            keeps the model loaded), ``"wsl"`` (TensorFlow inside WSL, e.g. on an
+            AMD GPU via ROCm), ``"rocm"`` (the same with one persistent process),
+            or ``"auto"``/None.  Auto honours ``$INKSIGHT_RUNNER`` if set, then
             prefers TensorFlow in this environment and falls back to Docker.
         tool: Program the runner must be able to execute.
 
@@ -44,9 +47,14 @@ def get_runner(spec: Union[str, Runner, None], tool: str) -> Runner:
     if name in ("docker-gpu", "docker-server", "docker-gpu-server"):
         return DockerRunner(gpus="all" if "gpu" in name else None,
                             persistent=True if "server" in name else None)
+    if name == "wsl":
+        return WslRunner()
+    if name == "rocm":
+        return WslRunner(persistent=True)
     if name != "auto":
         raise ValueError(f"unknown runner {spec!r}; expected 'auto', 'local', 'docker', "
-                         "'docker-gpu', 'docker-server', 'docker-gpu-server' or a Runner")
+                         "'docker-gpu', 'docker-server', 'docker-gpu-server', 'wsl', 'rocm' "
+                         "or a Runner")
 
     local = LocalRunner()
     if local.is_available(tool):

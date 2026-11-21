@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Sequence
 from ..build import build_docker_image, default_image_name
 from ..errors import BackendNotAvailableError, VectorizationError
 from .base import Runner, RunResult
+from .spool import ServerStopped, submit_job
 
 #: Seconds allowed for cheap Docker queries (``docker version``, ``image inspect``).
 _QUERY_TIMEOUT = 30
@@ -242,32 +243,19 @@ class DockerRunner(Runner):
         server = self.start_server()
         spool = self._spool
         assert spool is not None
-        job_dir = spool / uuid.uuid4().hex[:12]
-        started = time.perf_counter()
-        shutil.copytree(workdir, job_dir)
-        (job_dir / ".ready").touch()
         command = [self.docker, "exec", server, tool, *map(str, args)]   # for messages only
-        checked = time.monotonic()
+        started = time.perf_counter()
         try:
-            while not (job_dir / ".done").exists():
-                if timeout is not None and time.perf_counter() - started > timeout:
-                    # The server works on one job at a time; stop it so the next call starts clean.
-                    self.close()
-                    raise VectorizationError(f"'{tool}' did not finish within {timeout:g} s")
-                if time.monotonic() - checked > 5:          # cheap liveness check every 5 s
-                    checked = time.monotonic()
-                    if not self._server_running():
-                        logs = self._server_logs()
-                        self.close()
-                        return RunResult(command, 1, "the inksight server container stopped:\n"
-                                         + logs, time.perf_counter() - started)
-                time.sleep(0.05)
-            if (job_dir / "output.json").is_file():
-                shutil.copy2(job_dir / "output.json", workdir / "output.json")
-            code = int((job_dir / "exitcode").read_text().strip() or 1)
-            log = (job_dir / "log.txt").read_text(encoding="utf-8", errors="replace")
-        finally:
-            shutil.rmtree(job_dir, ignore_errors=True)
+            code, log = submit_job(spool, workdir, timeout=timeout, alive=self._server_running,
+                                   what=tool)
+        except VectorizationError:
+            self.close()      # one job at a time: stop it so the next call starts clean
+            raise
+        except ServerStopped:
+            logs = self._server_logs()
+            self.close()
+            return RunResult(command, 1, "the inksight server container stopped:\n" + logs,
+                             time.perf_counter() - started)
         return RunResult(command, code, log, time.perf_counter() - started)
 
     def describe(self) -> str:

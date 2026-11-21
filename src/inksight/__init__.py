@@ -55,7 +55,7 @@ from .images import ImageLike, load_grayscale, load_rgb  # noqa: E402
 from .methods import InkSightPage, InkSightWord  # noqa: E402
 from .model import ModelJob, ModelVectorizer  # noqa: E402
 from .prompts import InferenceMode  # noqa: E402
-from .runners import DockerRunner, LocalRunner, Runner, RunResult, get_runner  # noqa: E402
+from .runners import DockerRunner, LocalRunner, Runner, RunResult, WslRunner, get_runner  # noqa: E402
 from .words import (  # noqa: E402
     DoctrWordDetector,
     PaddleOCRWordDetector,
@@ -80,7 +80,7 @@ __all__ = [
     "WordDetector", "Words", "DoctrWordDetector", "PaddleOCRWordDetector",
     "TesseractWordDetector", "WholeImageDetector", "available_detectors", "get_detector",
     # runners
-    "Runner", "RunResult", "LocalRunner", "DockerRunner", "get_runner",
+    "Runner", "RunResult", "LocalRunner", "DockerRunner", "WslRunner", "get_runner",
     # errors
     "InksightError", "InvalidImageError", "MissingDependencyError",
     "BackendNotAvailableError", "BackendBuildError", "VectorizationError",

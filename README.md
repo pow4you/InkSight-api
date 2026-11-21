@@ -117,9 +117,11 @@ the 5-word example page, word boxes given:
 | `docker-server` (CPU) | 779 s (incl. a 3 min image build) | 499 s |
 | `docker-gpu` (container per call) | 34 s | 33 s |
 | `docker-gpu-server` | 32 s | **14.5 s** |
+| `rocm` (RX 7900 XT, WSL, persistent) | 78 s (incl. unpacking the model once) | **6.7 s** |
 
-That makes the warm GPU server about 34× faster than the CPU per page. Page plus
-an extra word image in one `vectorize_many` call took the same 14.5 s.
+That makes the warm GPU server about 34× faster than the CPU per page (75× on
+the AMD card). Page plus an extra word image in one `vectorize_many` call took
+the same time as the page alone (14.5 s / 6.6 s).
 
 How the words are scheduled (`ModelSession.generate`):
 
@@ -162,7 +164,41 @@ Notes: TensorFlow's Windows wheels are CPU-only, so on Windows Docker (or WSL)
 is the only GPU route. The weights are bfloat16: GPUs before Ampere (e.g. a GTX
 1080 Ti, compute capability 6.1) have no native bfloat16 and XLA computes it
 in float32 - still far faster than a CPU, just not as fast as an RTX 30xx+.
-AMD GPUs would need `tensorflow-rocm` on Linux, which is not set up here.
+For AMD GPUs see the next section.
+
+### On an AMD GPU, through WSL (ROCm)
+
+TensorFlow has no Vulkan or DirectML backend that can run this model, and
+Docker Desktop has no AMD passthrough. AMD's ROCm does run inside WSL 2,
+though (Radeon RX 7900 / 9000 series and matching Radeon PRO cards), with an
+official TensorFlow 2.20 wheel. `WslRunner` starts the model program in a WSL
+distro through `wsl.exe`; the package source is used from the Windows side.
+
+```powershell
+wsl --install -d Ubuntu-24.04 --no-launch
+wsl -d Ubuntu-24.04 -u root -- bash scripts/setup-rocm-wsl.sh     # ROCm 7.2 + tensorflow-rocm; several GB
+$env:INKSIGHT_WSL_DISTRO = "Ubuntu-24.04"                         # if it is not your default distro
+python -m inksight vectorize page.png --runner rocm
+```
+
+```python
+InkSightPage(runner="rocm")                    # = WslRunner(persistent=True): model stays loaded
+InkSightPage(runner=WslRunner("Ubuntu-24.04", "/opt/inksight-rocm/bin/python"))   # one process per call
+```
+
+* Only AMD's `tensorflow-rocm` may be installed in that environment. The stock
+  `tensorflow` (which `tensorflow-text` pulls in) sits next to it and hides the
+  GPU, so the setup script leaves `tensorflow-text` out and inksight uses its
+  sentencepiece tokenizer route there.
+* With `tensorflow-rocm` installed, inksight drops the notebook's
+  `--xla_gpu_autotune_level=0`: without autotuning MIOpen gets no convolution
+  workspace and the image encoder fails ("Not enough workspace for
+  GemmFwdRest"). `INKSIGHT_ROCM=0/1` overrides the detection.
+* The answers differ slightly from the CPU's (same strokes, a few points
+  different), as expected from different hardware and kernels.
+* ROCm on WSL is still young: after a crashed run the GPU may refuse to start
+  ("CreateContext fail") until `wsl --shutdown`. The Windows side needs AMD
+  Software: Adrenalin Edition with WSL support (AMD lists 26.1.1+ for ROCm 7.2).
 
 ### Windows
 
@@ -253,7 +289,7 @@ drawing = page.vectorize("page.png", words=np.array([[x0, y0, x1, y1], ...]))
 
 | Option | Applies to | Meaning |
 |--------|-----------|---------|
-| `runner` | both | `"auto"` (TensorFlow here if installed, else Docker), `"local"`, `"docker"`, `"docker-gpu"`, or a `Runner` object |
+| `runner` | both | `"auto"` (TensorFlow here if installed, else Docker), `"local"`, `"docker"`, `"docker-gpu"`, `"rocm"`, or a `Runner` object |
 | `mode` | both | `"r+d"` recognize and derender (default, as in the notebook), `"vanilla"` no text involved, `"d+t"` derender the given text |
 | `fallback_mode` | both | retried for words that come back without strokes (default `"vanilla"`, as in the notebook; `None` disables) |
 | `batch_size` | both | words per forward pass (32) |

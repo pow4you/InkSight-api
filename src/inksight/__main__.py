@@ -180,7 +180,7 @@ def _build_parser() -> argparse.ArgumentParser:
     vec.add_argument("--batch-size", type=int, default=32, help="words per forward pass (default: 32)")
     vec.add_argument("--invert", action="store_true", help="writing is light on dark")
     vec.add_argument("--runner", choices=["auto", "local", "docker", "docker-gpu", "docker-server",
-                                                "docker-gpu-server"], default="auto",
+                                                "docker-gpu-server", "wsl", "rocm"], default="auto",
                      help="where the model runs (default: auto)")
     vec.add_argument("--timeout", type=float, help="abort the model after this many seconds (docker)")
     vec.add_argument("--workdir", help="keep intermediate files and the model log here")
