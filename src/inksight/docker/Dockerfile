@@ -27,12 +27,14 @@ ARG BASE_IMAGE=python:3.12-slim
 FROM ${BASE_IMAGE}
 
 ARG TF_PACKAGE="tensorflow==2.20.0"
+# Extra pins, e.g. the cuDNN the GPU build needs (see GPU_EXTRA_PACKAGES).
+ARG EXTRA_PACKAGES=""
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Versions follow the official notebook.
-RUN pip install "${TF_PACKAGE}" "tensorflow-text==2.20.1" "sentencepiece>=0.2.1" \
+RUN pip install "${TF_PACKAGE}" ${EXTRA_PACKAGES} "tensorflow-text==2.20.1" "sentencepiece>=0.2.1" \
         "numpy" "Pillow"
 
 # Unpack the bundled model once, at build time, verifying the archive's hash.

@@ -20,6 +20,11 @@ _QUERY_TIMEOUT = 30
 #: TensorFlow requirement installed into the image when a GPU is requested.
 GPU_TF_PACKAGE = "tensorflow[and-cuda]==2.20.0"
 
+#: tensorflow[and-cuda] only sets a lower bound on cuDNN, and pip picks the newest
+#: 9.x, which no longer runs on Pascal GPUs (GTX 10xx: "cudnn status 5003").
+#: TensorFlow 2.20 is built against cuDNN 9.3, which runs on all its targets (sm_60+).
+GPU_EXTRA_PACKAGES = "nvidia-cudnn-cu12==9.3.0.75"
+
 
 class DockerRunner(Runner):
     """Executes ``inksight-model`` from the ``inksight-backend`` Docker image.
@@ -60,6 +65,7 @@ class DockerRunner(Runner):
         self.build_args = dict(build_args or {})
         if self.gpus:
             self.build_args.setdefault("TF_PACKAGE", GPU_TF_PACKAGE)
+            self.build_args.setdefault("EXTRA_PACKAGES", GPU_EXTRA_PACKAGES)
         self.run_args = list(run_args)
         self.network = network
         self._image = image
