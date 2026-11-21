@@ -121,11 +121,12 @@ class ModelSession:
         except Exception as exc:
             raise BackendNotAvailableError(f"could not load the model at {model_dir}: {exc}") from exc
         self._tf, self._model = tf, model
+        self.devices = [d.name for d in tf.config.list_logical_devices() if d.device_type != "CPU"]             or ["CPU"]
         self._signature = model.signatures["serving_default"]
         self.model_dir = model_dir
         self.load_seconds = time.perf_counter() - started
-        logger.info("model loaded from %s in %.1f s (tokenizer: %s)",
-                    self.loaded_from, self.load_seconds, self.tokenizer)
+        logger.info("model loaded from %s in %.1f s (tokenizer: %s, devices: %s)",
+                    self.loaded_from, self.load_seconds, self.tokenizer, ", ".join(self.devices))
 
     @classmethod
     def get(cls, model_dir: Path, tokenizer: str = "auto") -> "ModelSession":
@@ -200,6 +201,7 @@ def run_job(job_path: Path, *, model_dir: Optional[str] = None, tokenizer: str =
     logger.info("derendered %d word(s) in %.1f s", len(names), run_seconds)
 
     result = {"outputs": outputs, "model": str(session.model_dir), "tokenizer": session.tokenizer,
+              "devices": getattr(session, "devices", None),
               "load_seconds": session.load_seconds, "run_seconds": run_seconds}
     output = workdir / "output.json"
     output.write_text(json.dumps(result, indent=1), encoding="utf-8")

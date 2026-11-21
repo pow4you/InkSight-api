@@ -17,6 +17,9 @@ from .base import Runner, RunResult
 #: Seconds allowed for cheap Docker queries (``docker version``, ``image inspect``).
 _QUERY_TIMEOUT = 30
 
+#: TensorFlow requirement installed into the image when a GPU is requested.
+GPU_TF_PACKAGE = "tensorflow[and-cuda]==2.20.0"
+
 
 class DockerRunner(Runner):
     """Executes ``inksight-model`` from the ``inksight-backend`` Docker image.
@@ -37,16 +40,26 @@ class DockerRunner(Runner):
         run_args: Extra ``docker run`` arguments, e.g. ``["--cpus", "4"]``.
         network: Container network mode.  The model needs no network access,
             so the default is ``"none"``.
+        gpus: Give the container NVIDIA GPUs (``docker run --gpus <value>``):
+            ``"all"``, ``"1"``, ``"device=0"``, ...  The image is then built
+            with CUDA-enabled TensorFlow (a separate tag from the CPU image).
+            Default: ``$INKSIGHT_DOCKER_GPUS`` if set, else CPU only.  Needs the
+            NVIDIA driver and the NVIDIA Container Toolkit on the host (Docker
+            Desktop's WSL 2 backend has it built in).
     """
 
     name = "docker"
 
     def __init__(self, image: Optional[str] = None, *, auto_build: bool = True,
                  docker: str = "docker", build_args: Optional[Dict[str, str]] = None,
-                 run_args: Sequence[str] = (), network: str = "none") -> None:
+                 run_args: Sequence[str] = (), network: str = "none",
+                 gpus: Optional[str] = None) -> None:
         self.docker = docker
         self.auto_build = auto_build
+        self.gpus = gpus if gpus is not None else (os.environ.get("INKSIGHT_DOCKER_GPUS") or None)
         self.build_args = dict(build_args or {})
+        if self.gpus:
+            self.build_args.setdefault("TF_PACKAGE", GPU_TF_PACKAGE)
         self.run_args = list(run_args)
         self.network = network
         self._image = image
@@ -100,6 +113,8 @@ class DockerRunner(Runner):
             "--mount", f"type=bind,source={Path(workdir).resolve()},target=/work",
             "--workdir", "/work",
         ]
+        if self.gpus:
+            command += ["--gpus", self.gpus]
         if hasattr(os, "getuid"):
             # Write results as the calling user so the scratch directory stays removable.
             command += ["--user", f"{os.getuid()}:{os.getgid()}",
@@ -122,7 +137,7 @@ class DockerRunner(Runner):
                          time.perf_counter() - started)
 
     def describe(self) -> str:
-        return f"Docker image {self.image}"
+        return f"Docker image {self.image}" + (f" (GPUs: {self.gpus})" if self.gpus else "")
 
     # ---------------------------------------------------------------- helpers
     @staticmethod

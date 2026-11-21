@@ -12,15 +12,27 @@
 #   docker run --rm -v "$PWD":/work inksight-backend inksight-model job.json
 #
 # Linux has tensorflow-text, so here the graph runs exactly as exported (no
-# tokenizer rewrite).  CPU only.
+# tokenizer rewrite).
+#
+# CPU by default.  For an NVIDIA GPU build with
+#
+#   --build-arg TF_PACKAGE="tensorflow[and-cuda]==2.20.0"
+#
+# (DockerRunner(gpus="all") / runner="docker-gpu" does this) and run with
+# `docker run --gpus all ...`.  The and-cuda wheels bring CUDA and cuDNN as pip
+# packages; the host only needs the NVIDIA driver plus the NVIDIA Container
+# Toolkit (Docker Desktop on Windows: WSL 2 backend, works out of the box).
 
-FROM python:3.12-slim
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
+
+ARG TF_PACKAGE="tensorflow==2.20.0"
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Versions follow the official notebook.
-RUN pip install "tensorflow==2.20.0" "tensorflow-text==2.20.1" "sentencepiece>=0.2.1" \
+RUN pip install "${TF_PACKAGE}" "tensorflow-text==2.20.1" "sentencepiece>=0.2.1" \
         "numpy" "Pillow"
 
 # Unpack the bundled model once, at build time, verifying the archive's hash.

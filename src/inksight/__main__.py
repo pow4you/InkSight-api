@@ -99,7 +99,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         path = prepare_local(model_dir=args.model_dir, tokenizer=args.tokenizer)
         print(f"local model ready: {path}")
     else:
-        image = build_docker_image(quiet=False)
+        runner = DockerRunner(gpus="all" if args.gpu else None)
+        image = build_docker_image(runner.image, build_args=runner.build_args, quiet=False)
         print(f"backend image ready: {image}")
     return 0
 
@@ -160,7 +161,7 @@ def _build_parser() -> argparse.ArgumentParser:
                           "(default: doctr)")
     vec.add_argument("--batch-size", type=int, default=32, help="words per forward pass (default: 32)")
     vec.add_argument("--invert", action="store_true", help="writing is light on dark")
-    vec.add_argument("--runner", choices=["auto", "local", "docker"], default="auto",
+    vec.add_argument("--runner", choices=["auto", "local", "docker", "docker-gpu"], default="auto",
                      help="where the model runs (default: auto)")
     vec.add_argument("--timeout", type=float, help="abort the model after this many seconds (docker)")
     vec.add_argument("--workdir", help="keep intermediate files and the model log here")
@@ -180,6 +181,8 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="unpack the bundled model (and rewrite its tokenizer if needed) now")
     what.add_argument("--bundle", metavar="SAVED_MODEL_DIR",
                       help="compress a SavedModel folder into the package")
+    build.add_argument("--gpu", action="store_true",
+                       help="--docker: build the CUDA image used by --runner docker-gpu")
     build.add_argument("--model-dir", help="--local: use this SavedModel instead of the bundle")
     build.add_argument("--tokenizer", choices=["auto", "tensorflow-text", "sentencepiece"],
                        default="auto", help="--local: tokenizer route (default: auto)")

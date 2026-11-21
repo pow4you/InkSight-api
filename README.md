@@ -86,6 +86,36 @@ weights are bfloat16, which CPUs without native bfloat16 support compute
 slowly. A GPU (Linux: `pip install "tensorflow[and-cuda]==2.20.0"`) is the way
 to make it fast; the authors' notebook targets one too.
 
+### On a GPU, through Docker
+
+The checkpoint's graph is plain TensorFlow/XLA (no CPU-only compiled modules),
+so the same SavedModel runs on an NVIDIA GPU; the XLA flags the notebook sets
+are GPU flags to begin with.
+
+```bash
+python -m inksight build --docker --gpu                 # CUDA image, separate tag; once
+python -m inksight vectorize page.png --runner docker-gpu
+```
+
+```python
+InkSightPage(runner="docker-gpu")                        # = DockerRunner(gpus="all")
+InkSightPage(runner=DockerRunner(gpus="device=0"))       # pick a card
+```
+
+or set `INKSIGHT_DOCKER_GPUS=all` to make every Docker runner use the GPU. The
+image installs `tensorflow[and-cuda]==2.20.0` (CUDA and cuDNN as pip wheels), so
+the host only needs the NVIDIA driver and the NVIDIA Container Toolkit. On
+Windows, Docker Desktop's WSL 2 backend passes the GPU through out of the box;
+check with `docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi`.
+`output.json` (and the log) name the devices TensorFlow saw, so a run that
+silently fell back to the CPU is visible.
+
+Notes: TensorFlow's Windows wheels are CPU-only, so on Windows Docker (or WSL)
+is the only GPU route. The weights are bfloat16: GPUs before Ampere (e.g. a GTX
+1080 Ti, compute capability 6.1) have no native bfloat16 and XLA computes it
+in float32 - still far faster than a CPU, just not as fast as an RTX 30xx+.
+AMD GPUs would need `tensorflow-rocm` on Linux, which is not set up here.
+
 ### Windows
 
 TensorFlow 2.20 has native Windows CPU wheels and the model's XLA-compiled core
@@ -175,7 +205,7 @@ drawing = page.vectorize("page.png", words=np.array([[x0, y0, x1, y1], ...]))
 
 | Option | Applies to | Meaning |
 |--------|-----------|---------|
-| `runner` | both | `"auto"` (TensorFlow here if installed, else Docker), `"local"`, `"docker"`, or a `Runner` object |
+| `runner` | both | `"auto"` (TensorFlow here if installed, else Docker), `"local"`, `"docker"`, `"docker-gpu"`, or a `Runner` object |
 | `mode` | both | `"r+d"` recognize and derender (default, as in the notebook), `"vanilla"` no text involved, `"d+t"` derender the given text |
 | `fallback_mode` | both | retried for words that come back without strokes (default `"vanilla"`, as in the notebook; `None` disables) |
 | `batch_size` | both | words per forward pass (32) |

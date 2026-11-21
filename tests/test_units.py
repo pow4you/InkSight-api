@@ -359,3 +359,20 @@ class TestWorker:
 def test_image_name_tracks_the_sources():
     name = inksight.DockerRunner().image
     assert name.startswith("inksight-backend:") and len(name.split(":")[1]) == 12
+
+
+def test_gpu_docker_runner_uses_a_cuda_image_and_passes_the_gpus(monkeypatch, tmp_path):
+    monkeypatch.delenv("INKSIGHT_DOCKER_GPUS", raising=False)
+    cpu, gpu = inksight.DockerRunner(), inksight.get_runner("docker-gpu", "inksight-model")
+    assert gpu.gpus == "all" and "and-cuda" in gpu.build_args["TF_PACKAGE"]
+    assert cpu.image != gpu.image                                  # separate tags
+
+    commands = []
+    monkeypatch.setattr(gpu, "ensure_image", lambda: gpu.image)
+    monkeypatch.setattr("subprocess.run", lambda command, **kw: commands.append(command)
+                        or type("Done", (), {"returncode": 0, "stdout": ""})())
+    gpu.run("inksight-model", ["job.json"], tmp_path)
+    assert commands[0][commands[0].index("--gpus") + 1] == "all"
+
+    monkeypatch.setenv("INKSIGHT_DOCKER_GPUS", "device=0")
+    assert inksight.DockerRunner().gpus == "device=0"
